@@ -13,6 +13,8 @@ import { drawCards } from "../systems/CardPool";
 import { Enemy } from "../entities/Enemy";
 import { Tower } from "../entities/Tower";
 import { Projectile } from "../entities/Projectile";
+import { createButton } from "../ui/Button";
+import type { ResultData } from "./ResultScene";
 
 type Phase = "build" | "wave" | "cardPick" | "ended";
 type Selection =
@@ -43,6 +45,9 @@ export class GameScene extends Phaser.Scene {
   private startButton!: Phaser.GameObjects.Container;
   private handContainer!: Phaser.GameObjects.Container;
   private cardModal: Phaser.GameObjects.Container | null = null;
+  private pauseModal: Phaser.GameObjects.Container | null = null;
+  private isPaused = false;
+  private matchStartTime = 0;
 
   constructor() {
     super("GameScene");
@@ -50,11 +55,13 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.resetState();
+    this.matchStartTime = this.time.now;
     this.path = createPath();
     this.drawPath();
     this.drawBase();
     this.drawSlots();
     this.drawHud();
+    this.drawPauseButton();
     this.handContainer = this.add.container(0, 0);
     this.drawStartButton();
     this.refreshHand();
@@ -70,6 +77,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   override update(time: number, delta: number): void {
+    if (this.isPaused) return;
     if (this.phase === "ended" || this.phase === "cardPick") return;
     const dt = delta / 1000;
 
@@ -137,6 +145,8 @@ export class GameScene extends Phaser.Scene {
     this.upgradeTokens = 0;
     this.selection = null;
     this.cardModal = null;
+    this.pauseModal = null;
+    this.isPaused = false;
   }
 
   private drawPath(): void {
@@ -273,20 +283,94 @@ export class GameScene extends Phaser.Scene {
     this.statusText.setText(won ? "VICTORY" : "DEFEAT");
     this.statusText.setColor(won ? "#4ade80" : "#ef4444");
 
-    const hint = this.add
-      .text(SCREEN.width / 2, SCREEN.height / 2 + 80, "Tap anywhere to retry", {
+    const waveReached = won ? WAVES.length : this.waveIndex + 1;
+    const duration = Math.floor((this.time.now - this.matchStartTime) / 1000);
+    const result: ResultData = { won, waveReached, duration };
+
+    this.time.delayedCall(900, () => {
+      this.scene.start("ResultScene", result);
+    });
+  }
+
+  // === Pause ===
+
+  private drawPauseButton(): void {
+    createButton(this, SCREEN.width - 60, 40, {
+      label: "PAUSE",
+      width: 100,
+      height: 44,
+      fillColor: 0x475569,
+      textColor: "#ffffff",
+      fontSize: 14,
+      onClick: () => this.togglePause(),
+    });
+  }
+
+  private togglePause(): void {
+    if (this.phase === "ended" || this.phase === "cardPick") return;
+    this.isPaused = !this.isPaused;
+    if (this.isPaused) {
+      this.showPauseModal();
+    } else {
+      this.hidePauseModal();
+    }
+  }
+
+  private showPauseModal(): void {
+    const overlay = this.add.rectangle(
+      SCREEN.width / 2,
+      SCREEN.height / 2,
+      SCREEN.width,
+      SCREEN.height,
+      0x000000,
+      0.7,
+    );
+    overlay.setInteractive();
+
+    const title = this.add
+      .text(SCREEN.width / 2, SCREEN.height * 0.32, "PAUSED", {
         fontFamily: "sans-serif",
-        fontSize: "20px",
-        color: "#e5e7eb",
+        fontSize: "56px",
+        fontStyle: "bold",
+        color: "#ffffff",
       })
       .setOrigin(0.5);
 
-    this.time.delayedCall(600, () => {
-      this.input.once("pointerdown", () => {
-        hint.destroy();
-        this.scene.restart();
-      });
+    const resume = createButton(this, SCREEN.width / 2, SCREEN.height * 0.48, {
+      label: "RESUME",
+      width: 280,
+      height: 64,
+      fillColor: 0x4ade80,
+      onClick: () => this.togglePause(),
     });
+    const restart = createButton(this, SCREEN.width / 2, SCREEN.height * 0.58, {
+      label: "RESTART",
+      width: 280,
+      height: 64,
+      fillColor: 0xf59e0b,
+      onClick: () => this.scene.restart(),
+    });
+    const quit = createButton(this, SCREEN.width / 2, SCREEN.height * 0.68, {
+      label: "QUIT TO TITLE",
+      width: 280,
+      height: 64,
+      fillColor: 0x475569,
+      textColor: "#ffffff",
+      onClick: () => this.scene.start("TitleScene"),
+    });
+
+    this.pauseModal = this.add.container(0, 0, [
+      overlay,
+      title,
+      resume,
+      restart,
+      quit,
+    ]);
+  }
+
+  private hidePauseModal(): void {
+    this.pauseModal?.destroy();
+    this.pauseModal = null;
   }
 
   // === Combat ===
