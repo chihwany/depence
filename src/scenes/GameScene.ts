@@ -739,11 +739,21 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const cardW = 200;
-    const cardH = 280;
+    const cardH = 320;
     const gap = 18;
     const totalW = cardW * 3 + gap * 2;
     const startX = (SCREEN.width - totalW) / 2 + cardW / 2;
     const cardY = SCREEN.height / 2;
+
+    // Layout per card (cardH=320, half=160):
+    //   colorBlock fills the top half (image area), full card width
+    //   label sits just below the image
+    //   description fills the remaining bottom space, wrapped
+    const imageH = 200; // image area height
+    const colorBlockY = -cardH / 2 + imageH / 2 + 4; // = -56
+    const iconSize = 180;
+    const labelY = colorBlockY + imageH / 2 + 22; // = 70
+    const descY = labelY + 38; // = 108
 
     const cardObjects: Phaser.GameObjects.Container[] = [];
     for (let i = 0; i < cards.length; i++) {
@@ -752,23 +762,31 @@ export class GameScene extends Phaser.Scene {
       const cx = startX + i * (cardW + gap);
       const bg = this.add.rectangle(0, 0, cardW, cardH, 0x1f2937);
       bg.setStrokeStyle(4, card.color);
-      const colorBlock = this.add.rectangle(0, -80, cardW - 20, 80, card.color);
+      const colorBlock = this.add.rectangle(
+        0,
+        colorBlockY,
+        cardW - 12,
+        imageH,
+        card.color,
+      );
 
       const iconKind = cardIconKind(card);
-      const icon = iconKind ? drawIcon(this, iconKind, 0, -80, 60, 0xffffff) : null;
+      const icon = iconKind
+        ? drawIcon(this, iconKind, 0, colorBlockY, iconSize, 0xffffff)
+        : null;
 
       const labelTxt = this.add
-        .text(0, -8, card.label, {
+        .text(0, labelY, card.label, {
           fontFamily: "sans-serif",
-          fontSize: "26px",
+          fontSize: "24px",
           fontStyle: "bold",
           color: "#ffffff",
         })
         .setOrigin(0.5);
       const descTxt = this.add
-        .text(0, 50, card.description, {
+        .text(0, descY, card.description, {
           fontFamily: "sans-serif",
-          fontSize: "16px",
+          fontSize: "15px",
           color: "#d1d5db",
           align: "center",
           wordWrap: { width: cardW - 24 },
