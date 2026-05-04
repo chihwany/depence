@@ -3,9 +3,28 @@ import { SCREEN } from "../data/balance";
 import { loadSave } from "../data/storage";
 import { createButton } from "../ui/Button";
 
+const ICON_KEYS = [
+  "sniper",
+  "cannon",
+  "frost",
+  "tesla",
+  "laser",
+  "frostgun",
+  "fireworks",
+  "inferno",
+  "tornado",
+  "mechanest",
+] as const;
+
 export class TitleScene extends Phaser.Scene {
   constructor() {
     super("TitleScene");
+  }
+
+  preload(): void {
+    for (const key of ICON_KEYS) {
+      this.load.image(`icon-${key}`, `assets/icons/${key}.svg`);
+    }
   }
 
   create(): void {
