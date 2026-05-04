@@ -65,29 +65,38 @@ export interface WaveDef {
   isBoss?: boolean;
 }
 
+// Smooth progression: 4 -> 6 -> 10 -> 15 -> 20 -> boss.
+// Early waves are deliberately light because the player only starts
+// with 1 tower + 1 road token. Each subsequent wave bumps enemy count,
+// then adds variety (runners at wave 3, tanks at wave 4), and tightens
+// spawn intervals.
 export const WAVES: WaveDef[] = [
+  // Wave 1 — gentle intro: 4 grunts, slow spawn
   { spawns: [
-      { type: "grunt", count: 10, interval: 600 },
+      { type: "grunt", count: 4, interval: 1000 },
     ] },
+  // Wave 2 — slightly more grunts
+  { spawns: [
+      { type: "grunt", count: 6, interval: 900 },
+    ] },
+  // Wave 3 — introduce runners
+  { spawns: [
+      { type: "grunt", count: 8, interval: 800 },
+      { type: "runner", count: 2, interval: 500, delay: 4000 },
+    ] },
+  // Wave 4 — more runners + first tank
+  { spawns: [
+      { type: "grunt", count: 10, interval: 700 },
+      { type: "runner", count: 4, interval: 400, delay: 3000 },
+      { type: "tank", count: 1, interval: 0, delay: 6000 },
+    ] },
+  // Wave 5 — heavy mixed wave
   { spawns: [
       { type: "grunt", count: 12, interval: 600 },
-      { type: "runner", count: 4, interval: 400, delay: 3500 },
+      { type: "runner", count: 6, interval: 350, delay: 2000 },
+      { type: "tank", count: 2, interval: 3000, delay: 4000 },
     ] },
-  { spawns: [
-      { type: "grunt", count: 12, interval: 550 },
-      { type: "runner", count: 6, interval: 350, delay: 2500 },
-      { type: "tank", count: 1, interval: 0, delay: 6500 },
-    ] },
-  { spawns: [
-      { type: "grunt", count: 14, interval: 500 },
-      { type: "runner", count: 8, interval: 300, delay: 1500 },
-      { type: "tank", count: 2, interval: 4000, delay: 5000 },
-    ] },
-  { spawns: [
-      { type: "grunt", count: 16, interval: 450 },
-      { type: "runner", count: 10, interval: 250, delay: 1200 },
-      { type: "tank", count: 4, interval: 3000, delay: 4000 },
-    ] },
+  // Wave 6 — boss
   { spawns: [{ type: "boss", count: 1, interval: 0 }], isBoss: true },
 ];
 
