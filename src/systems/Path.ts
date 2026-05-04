@@ -23,9 +23,9 @@ export const INITIAL_PATH_CELLS: GridPosition[] = [
 ];
 
 export const STARTING_SHAPE_TOKENS: { I: number; L: number; U: number } = {
-  I: 4,
-  L: 1,
-  U: 1,
+  I: 1,
+  L: 0,
+  U: 0,
 };
 
 export function buildCurvePathFromCells(

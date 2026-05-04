@@ -16,7 +16,7 @@ import {
   buildCurvePathFromCells,
 } from "../systems/Path";
 import { Grid, type GridPosition } from "../systems/Grid";
-import { getValidPlacements, type Placement } from "../systems/Shape";
+import { getBackPlacement, type Placement } from "../systems/Shape";
 import { WaveRunner } from "../systems/WaveRunner";
 import { drawCards } from "../systems/CardPool";
 import { Enemy } from "../entities/Enemy";
@@ -250,23 +250,26 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Highlight valid placements for the currently selected shape
+    // Highlight the single back-of-spawn placement for the selected shape
     if (
       this.phase === "build" &&
       this.selection?.kind === "shape" &&
       this.shapeTokens[this.selection.shapeId] > 0
     ) {
       const shape = SHAPES[this.selection.shapeId];
-      const placements = getValidPlacements(this.grid, this.currentSpawn(), shape);
-      for (const placement of placements) {
+      const placement = getBackPlacement(this.grid, this.pathCells, shape);
+      if (placement) {
         for (let i = 0; i < placement.cells.length; i++) {
           const c = placement.cells[i];
           if (!c) continue;
           const w = this.grid.cellToWorld(c.col, c.row);
           const x = w.x - size / 2 + 1;
           const y = w.y - size / 2 + 1;
-          // First cell (adjacent to spawn) brighter; rest fainter to suggest path
-          const alpha = i === 0 ? 0.95 : 0.5;
+          // Use a yellow fill + stroke so the preview reads clearly as
+          // "tap here", and never gets confused with the spawn's red fill.
+          this.gridGraphics.fillStyle(0xfde047, 0.25);
+          this.gridGraphics.fillRect(x, y, inner, inner);
+          const alpha = i === 0 ? 0.95 : 0.6;
           this.gridGraphics.lineStyle(3, 0xfde047, alpha);
           this.gridGraphics.strokeRect(x, y, inner, inner);
         }
@@ -954,26 +957,21 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Shape placement: shape token selected + tap a cell that belongs to a valid placement
+    // Shape placement: shape selected + tap any cell of the back placement
     if (this.selection?.kind === "shape") {
       const shape = SHAPES[this.selection.shapeId];
       if (this.shapeTokens[shape.id as ShapeId] <= 0) return;
-      const placements = getValidPlacements(this.grid, this.currentSpawn(), shape);
-      const matched = placements.find((p) =>
-        p.cells.some((c) => c.col === pos.col && c.row === pos.row),
-      );
-      if (matched) this.placeShape(shape.id as ShapeId, matched);
+      const placement = getBackPlacement(this.grid, this.pathCells, shape);
+      if (
+        placement &&
+        placement.cells.some((c) => c.col === pos.col && c.row === pos.row)
+      ) {
+        this.placeShape(shape.id as ShapeId, placement);
+      }
       return;
     }
-
-    // Contract spawn: no selection + tap on current spawn (path > 2)
-    if (
-      this.selection === null &&
-      cell.type === "spawn" &&
-      this.pathCells.length > 2
-    ) {
-      this.contractSpawn();
-    }
+    // Spawn taps no longer remove cells — placements are permanent within
+    // a match. (Removed accidental-contract behavior per user feedback.)
   }
 
   private placeShape(shapeId: ShapeId, placement: Placement): void {
@@ -1005,22 +1003,6 @@ export class GameScene extends Phaser.Scene {
 
     this.shapeTokens[shapeId]--;
     if (this.shapeTokens[shapeId] === 0) this.selection = null;
-
-    this.animateSpawnMove(newWorld.x, newWorld.y);
-    this.refreshHand();
-    this.redrawGrid();
-  }
-
-  // Tap-on-spawn undo: removes the front cell only (no token refund).
-  // Multi-cell shapes can be undone by tapping repeatedly.
-  private contractSpawn(): void {
-    if (this.pathCells.length <= 2) return;
-    const oldSpawn = this.pathCells.shift();
-    if (!oldSpawn) return;
-    this.grid.setCellType(oldSpawn.col, oldSpawn.row, "empty");
-    const newSpawn = this.currentSpawn();
-    this.grid.setCellType(newSpawn.col, newSpawn.row, "spawn");
-    const newWorld = this.grid.cellToWorld(newSpawn.col, newSpawn.row);
 
     this.animateSpawnMove(newWorld.x, newWorld.y);
     this.refreshHand();

@@ -76,3 +76,33 @@ export function getValidPlacements(
   }
   return out;
 }
+
+// "Back" of the spawn = opposite of the direction the path goes from spawn
+// to its next cell. A new block always attaches there, automatically
+// rotated so its first cell sits behind the spawn.
+export function computeBackDirection(pathCells: GridPosition[]): Direction {
+  if (pathCells.length < 2) return 0;
+  const spawn = pathCells[0]!;
+  const next = pathCells[1]!;
+  const dCol = next.col - spawn.col;
+  const dRow = next.row - spawn.row;
+  // Forward is where the path goes; back is the opposite.
+  if (dRow > 0) return 0; // forward south  -> back north  (default offsets)
+  if (dRow < 0) return 2; // forward north  -> back south
+  if (dCol > 0) return 3; // forward east   -> back west
+  if (dCol < 0) return 1; // forward west   -> back east
+  return 0;
+}
+
+export function getBackPlacement(
+  grid: Grid,
+  pathCells: GridPosition[],
+  shape: ShapeDef,
+): Placement | null {
+  if (pathCells.length === 0) return null;
+  const spawn = pathCells[0]!;
+  const dir = computeBackDirection(pathCells);
+  const cells = shapeCellsAt(spawn, shape, dir);
+  if (!isValidPlacement(grid, cells)) return null;
+  return { dir, cells };
+}
