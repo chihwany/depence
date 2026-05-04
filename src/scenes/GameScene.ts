@@ -7,7 +7,15 @@ import {
   type CardDef,
   type TowerType,
 } from "../data/balance";
-import { createPath, TOWER_SLOTS, type SlotPos } from "../systems/Path";
+import {
+  GRID_CONFIG,
+  SPAWN_CELL,
+  BASE_CELL,
+  INITIAL_ROADS,
+  buildCurvePath,
+  isPathValid,
+} from "../systems/Path";
+import { Grid, type GridPosition } from "../systems/Grid";
 import { WaveRunner } from "../systems/WaveRunner";
 import { drawCards } from "../systems/CardPool";
 import { Enemy } from "../entities/Enemy";
@@ -23,11 +31,13 @@ type Selection =
   | null;
 
 export class GameScene extends Phaser.Scene {
-  private path!: Phaser.Curves.Path;
+  private grid!: Grid;
+  private gridGraphics!: Phaser.GameObjects.Graphics;
+  private path: Phaser.Curves.Path | null = null;
   private enemies: Enemy[] = [];
   private towers: Tower[] = [];
   private projectiles: Projectile[] = [];
-  private slotMarkers = new Map<SlotPos, Phaser.GameObjects.Arc>();
+  private cellTowers = new Map<string, Tower>();
 
   private phase: Phase = "build";
   private waveIndex = 0;
@@ -60,10 +70,12 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     this.resetState();
     this.matchStartTime = this.time.now;
-    this.path = createPath();
-    this.drawPath();
-    this.drawBase();
-    this.drawSlots();
+    this.grid = new Grid(GRID_CONFIG, SPAWN_CELL, BASE_CELL);
+    this.applyInitialRoads();
+    this.gridGraphics = this.add.graphics();
+    this.redrawGrid();
+    this.drawSpawnAndBase();
+    this.setupGridInput();
     this.drawHud();
     this.drawSpeedButton();
     this.drawPauseButton();
@@ -90,7 +102,7 @@ export class GameScene extends Phaser.Scene {
     const dt = scaledDeltaMs / 1000;
     const t = this.gameTime;
 
-    if (this.phase === "wave" && this.waveRunner) {
+    if (this.phase === "wave" && this.waveRunner && this.path) {
       const newSpawns = this.waveRunner.tick(t);
       for (const stats of newSpawns) {
         this.enemies.push(new Enemy(this, this.path, stats));
@@ -147,7 +159,8 @@ export class GameScene extends Phaser.Scene {
     this.enemies = [];
     this.towers = [];
     this.projectiles = [];
-    this.slotMarkers.clear();
+    this.cellTowers.clear();
+    this.path = null;
     this.phase = "build";
     this.waveIndex = 0;
     this.baseHp = BASE.maxHp;
@@ -164,34 +177,86 @@ export class GameScene extends Phaser.Scene {
     this.tweens.timeScale = 1;
   }
 
-  private drawPath(): void {
-    const g = this.add.graphics();
-    g.lineStyle(28, 0x57534e, 0.45);
-    this.path.draw(g);
+  private applyInitialRoads(): void {
+    for (const r of INITIAL_ROADS) {
+      this.grid.setCellType(r.col, r.row, "road");
+    }
   }
 
-  private drawBase(): void {
-    const end = this.path.getPoint(1);
-    if (!end) return;
-    const base = this.add.rectangle(end.x, end.y, 90, 70, 0x166534);
-    base.setStrokeStyle(3, 0x4ade80);
+  private redrawGrid(): void {
+    this.gridGraphics.clear();
+    const size = this.grid.config.cellSize;
+    const inner = size - 2;
+    for (let row = 0; row < this.grid.config.rows; row++) {
+      for (let col = 0; col < this.grid.config.cols; col++) {
+        const cell = this.grid.getCell(col, row);
+        if (!cell) continue;
+        const w = this.grid.cellToWorld(col, row);
+        const x = w.x - size / 2 + 1;
+        const y = w.y - size / 2 + 1;
+
+        switch (cell.type) {
+          case "empty":
+            this.gridGraphics.fillStyle(0xffffff, 0.04);
+            this.gridGraphics.fillRect(x, y, inner, inner);
+            break;
+          case "road":
+            this.gridGraphics.fillStyle(0x78716c, 0.7);
+            this.gridGraphics.fillRect(x, y, inner, inner);
+            break;
+          case "spawn":
+            this.gridGraphics.fillStyle(0xef4444, 0.45);
+            this.gridGraphics.fillRect(x, y, inner, inner);
+            break;
+          case "base":
+            this.gridGraphics.fillStyle(0x16a34a, 0.45);
+            this.gridGraphics.fillRect(x, y, inner, inner);
+            break;
+          case "tower":
+            this.gridGraphics.fillStyle(0x1f2937, 0.6);
+            this.gridGraphics.fillRect(x, y, inner, inner);
+            break;
+        }
+
+        this.gridGraphics.lineStyle(1, 0xffffff, 0.08);
+        this.gridGraphics.strokeRect(x, y, inner, inner);
+      }
+    }
+  }
+
+  private drawSpawnAndBase(): void {
+    const s = this.grid.cellToWorld(this.grid.spawn.col, this.grid.spawn.row);
     this.add
-      .text(end.x, end.y, "BASE", {
+      .text(s.x, s.y, "SPAWN", {
         fontFamily: "sans-serif",
-        fontSize: "16px",
+        fontSize: "12px",
+        fontStyle: "bold",
+        color: "#ffffff",
+      })
+      .setOrigin(0.5);
+    const b = this.grid.cellToWorld(this.grid.base.col, this.grid.base.row);
+    this.add
+      .text(b.x, b.y, "BASE", {
+        fontFamily: "sans-serif",
+        fontSize: "12px",
+        fontStyle: "bold",
         color: "#ffffff",
       })
       .setOrigin(0.5);
   }
 
-  private drawSlots(): void {
-    for (const slot of TOWER_SLOTS) {
-      const marker = this.add.circle(slot.x, slot.y, 22, 0xffffff, 0.08);
-      marker.setStrokeStyle(2, 0xffffff, 0.35);
-      marker.setInteractive({ useHandCursor: true });
-      marker.on("pointerdown", () => this.onSlotTap(slot));
-      this.slotMarkers.set(slot, marker);
-    }
+  private setupGridInput(): void {
+    const cfg = this.grid.config;
+    const cx = cfg.offsetX + (cfg.cols * cfg.cellSize) / 2;
+    const cy = cfg.offsetY + (cfg.rows * cfg.cellSize) / 2;
+    const w = cfg.cols * cfg.cellSize;
+    const h = cfg.rows * cfg.cellSize;
+    const area = this.add.rectangle(cx, cy, w, h, 0x000000, 0);
+    area.setInteractive();
+    area.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      const cell = this.grid.worldToCell(p.x, p.y);
+      if (cell) this.onCellTap(cell);
+    });
   }
 
   private drawHud(): void {
@@ -237,8 +302,16 @@ export class GameScene extends Phaser.Scene {
   private updateStartButton(): void {
     if (!this.startButton.scene) return;
     if (this.phase === "build" && this.waveIndex < WAVES.length) {
+      const valid = isPathValid(this.grid);
       const lbl = this.startButton.list[1] as Phaser.GameObjects.Text;
-      lbl.setText(`START WAVE ${this.waveIndex + 1}`);
+      const bg = this.startButton.list[0] as Phaser.GameObjects.Rectangle;
+      if (valid) {
+        lbl.setText(`START WAVE ${this.waveIndex + 1}`);
+        bg.setFillStyle(0x4ade80);
+      } else {
+        lbl.setText("PATH INCOMPLETE");
+        bg.setFillStyle(0x6b7280);
+      }
       this.startButton.setVisible(true);
     } else {
       this.startButton.setVisible(false);
@@ -270,6 +343,9 @@ export class GameScene extends Phaser.Scene {
   private startWave(): void {
     if (this.phase !== "build") return;
     if (this.waveIndex >= WAVES.length) return;
+    const newPath = buildCurvePath(this.grid);
+    if (!newPath) return;
+    this.path = newPath;
     this.phase = "wave";
     this.selection = null;
     const wave = WAVES[this.waveIndex];
@@ -753,26 +829,40 @@ export class GameScene extends Phaser.Scene {
 
   // === Slot / tower interactions ===
 
-  private onSlotTap(slot: SlotPos): void {
-    if (this.phase === "ended" || this.phase === "cardPick") return;
-    if (!this.selection || this.selection.kind !== "tower") return;
+  private onCellTap(pos: GridPosition): void {
+    if (this.phase !== "build") return;
+    const cell = this.grid.getCell(pos.col, pos.row);
+    if (!cell) return;
 
-    const type = this.selection.towerType;
-    const idx = this.towerTokens.indexOf(type);
-    if (idx === -1) return;
+    if (this.selection?.kind === "tower") {
+      if (cell.type !== "empty") return;
+      const type = this.selection.towerType;
+      const idx = this.towerTokens.indexOf(type);
+      if (idx === -1) return;
 
-    const marker = this.slotMarkers.get(slot);
-    if (!marker) return;
+      const w = this.grid.cellToWorld(pos.col, pos.row);
+      const tower = new Tower(this, w.x, w.y, type);
+      this.towers.push(tower);
+      this.cellTowers.set(`${pos.col},${pos.row}`, tower);
+      this.grid.setCellType(pos.col, pos.row, "tower");
 
-    const tower = new Tower(this, slot.x, slot.y, type);
-    this.towers.push(tower);
+      this.towerTokens.splice(idx, 1);
+      this.selection = null;
+      this.refreshHand();
+      this.redrawGrid();
+      this.updateStartButton();
+      return;
+    }
 
-    this.towerTokens.splice(idx, 1);
-    this.selection = null;
-
-    marker.destroy();
-    this.slotMarkers.delete(slot);
-    this.refreshHand();
+    if (cell.type === "empty") {
+      this.grid.setCellType(pos.col, pos.row, "road");
+      this.redrawGrid();
+      this.updateStartButton();
+    } else if (cell.type === "road") {
+      this.grid.setCellType(pos.col, pos.row, "empty");
+      this.redrawGrid();
+      this.updateStartButton();
+    }
   }
 
   private onTowerTap(tower: Tower): void {
