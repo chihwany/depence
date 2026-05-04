@@ -32,7 +32,17 @@ export const ENEMIES: Record<EnemyType, EnemyStats> = {
   boss:   { hp: 250, speed: 45,  damage: 5, reward: 50, color: 0xdc2626, radius: 28, label: "B" },
 };
 
-export type TowerType = "sniper" | "cannon" | "frost";
+export type TowerType =
+  | "sniper"
+  | "cannon"
+  | "frost"
+  | "tesla"
+  | "laser"
+  | "frostgun"
+  | "fireworks"
+  | "inferno"
+  | "tornado"
+  | "mechanest";
 
 export interface TowerStats {
   damage: number;
@@ -47,9 +57,18 @@ export interface TowerStats {
 }
 
 export const TOWERS: Record<TowerType, TowerStats> = {
-  sniper: { damage: 8, range: 240, fireRate: 800,  color: 0x3b82f6, radius: 18, label: "S" },
-  cannon: { damage: 5, range: 180, fireRate: 1200, color: 0xf97316, radius: 20, label: "C", aoeRadius: 70 },
-  frost:  { damage: 1, range: 150, fireRate: 500,  color: 0x06b6d4, radius: 16, label: "F", slowMul: 0.5, slowDuration: 1500 },
+  // Original 3 — kept for backwards compatibility
+  sniper:    { damage: 8,  range: 240, fireRate: 800,  color: 0x3b82f6, radius: 18, label: "S" },
+  cannon:    { damage: 5,  range: 180, fireRate: 1200, color: 0xf97316, radius: 20, label: "C", aoeRadius: 70 },
+  frost:     { damage: 1,  range: 150, fireRate: 500,  color: 0x06b6d4, radius: 16, label: "F", slowMul: 0.5, slowDuration: 1500 },
+  // New tier — distinct stats per tower
+  tesla:     { damage: 3,  range: 140, fireRate: 400,  color: 0x60a5fa, radius: 17, label: "Te", aoeRadius: 60 },
+  laser:     { damage: 2,  range: 220, fireRate: 200,  color: 0xeab308, radius: 16, label: "La" },
+  frostgun:  { damage: 2,  range: 170, fireRate: 600,  color: 0x67e8f9, radius: 17, label: "Fg", slowMul: 0.3, slowDuration: 2000 },
+  fireworks: { damage: 14, range: 200, fireRate: 2500, color: 0xf43f5e, radius: 19, label: "Fw", aoeRadius: 110 },
+  inferno:   { damage: 3,  range: 90,  fireRate: 250,  color: 0xea580c, radius: 17, label: "In" },
+  tornado:   { damage: 4,  range: 160, fireRate: 700,  color: 0x9ca3af, radius: 17, label: "Tn", slowMul: 0.7, slowDuration: 1000 },
+  mechanest: { damage: 12, range: 220, fireRate: 900,  color: 0x8b5cf6, radius: 20, label: "Mn" },
 };
 
 export const PROJECTILE = {
@@ -162,13 +181,24 @@ export interface CardDef {
 }
 
 export const CARD_POOL: CardDef[] = [
-  { id: "sniper",   label: "Sniper",   description: "1× Sniper tower",        color: 0x3b82f6, effect: { kind: "addTower", towerType: "sniper" } },
-  { id: "cannon",   label: "Cannon",   description: "1× Cannon (AOE)",        color: 0xf97316, effect: { kind: "addTower", towerType: "cannon" } },
-  { id: "frost",    label: "Frost",    description: "1× Frost (slow)",        color: 0x06b6d4, effect: { kind: "addTower", towerType: "frost" } },
-  { id: "shape-i",  label: "Straight", description: "+1 Straight piece (2 cells)", color: 0x78716c, effect: { kind: "addShape", shapeId: "I", amount: 1 } },
-  { id: "shape-l",  label: "L Turn",   description: "+1 L-Turn piece (2 cells)",    color: 0xa78bfa, effect: { kind: "addShape", shapeId: "L", amount: 1 } },
-  { id: "shape-u",  label: "U Turn",   description: "+1 U-Turn piece (3 cells)",    color: 0xfb923c, effect: { kind: "addShape", shapeId: "U", amount: 1 } },
-  { id: "upgrade",  label: "Upgrade",  description: "+1 level on a tower",    color: 0xa855f7, effect: { kind: "upgrade" } },
-  { id: "boost",    label: "Power Up", description: "All towers +25% damage", color: 0xfacc15, effect: { kind: "damageBoost", mul: 1.25 } },
-  { id: "repair",   label: "Repair",   description: "Restore 5 base HP",      color: 0x22c55e, effect: { kind: "repair", amount: 5 } },
+  // Tower cards — original
+  { id: "sniper",    label: "Sniper",    description: "1× Sniper tower",         color: 0x3b82f6, effect: { kind: "addTower", towerType: "sniper" } },
+  { id: "cannon",    label: "Cannon",    description: "1× Cannon (AOE)",         color: 0xf97316, effect: { kind: "addTower", towerType: "cannon" } },
+  { id: "frost",     label: "Frost",     description: "1× Frost (slow)",         color: 0x06b6d4, effect: { kind: "addTower", towerType: "frost" } },
+  // Tower cards — new
+  { id: "tesla",     label: "Tesla",     description: "1× Tesla (small AOE, fast)",   color: 0x60a5fa, effect: { kind: "addTower", towerType: "tesla" } },
+  { id: "laser",     label: "Laser",     description: "1× Laser (rapid single)",      color: 0xeab308, effect: { kind: "addTower", towerType: "laser" } },
+  { id: "frostgun",  label: "Frost Gun", description: "1× Frost Gun (heavy slow)",    color: 0x67e8f9, effect: { kind: "addTower", towerType: "frostgun" } },
+  { id: "fireworks", label: "Fireworks", description: "1× Fireworks (huge AOE)",      color: 0xf43f5e, effect: { kind: "addTower", towerType: "fireworks" } },
+  { id: "inferno",   label: "Inferno",   description: "1× Inferno (close range DPS)", color: 0xea580c, effect: { kind: "addTower", towerType: "inferno" } },
+  { id: "tornado",   label: "Tornado",   description: "1× Tornado (slow + damage)",   color: 0x9ca3af, effect: { kind: "addTower", towerType: "tornado" } },
+  { id: "mechanest", label: "Mecha Nest",description: "1× Mecha Nest (elite)",        color: 0x8b5cf6, effect: { kind: "addTower", towerType: "mechanest" } },
+  // Shape cards
+  { id: "shape-i",   label: "Straight",  description: "+1 Straight piece (2 cells)",  color: 0x78716c, effect: { kind: "addShape", shapeId: "I", amount: 1 } },
+  { id: "shape-l",   label: "L Turn",    description: "+1 L-Turn piece (2 cells)",    color: 0xa78bfa, effect: { kind: "addShape", shapeId: "L", amount: 1 } },
+  { id: "shape-u",   label: "U Turn",    description: "+1 U-Turn piece (3 cells)",    color: 0xfb923c, effect: { kind: "addShape", shapeId: "U", amount: 1 } },
+  // Utility
+  { id: "upgrade",   label: "Upgrade",   description: "+1 level on a tower",     color: 0xa855f7, effect: { kind: "upgrade" } },
+  { id: "boost",     label: "Power Up",  description: "All towers +25% damage",  color: 0xfacc15, effect: { kind: "damageBoost", mul: 1.25 } },
+  { id: "repair",    label: "Repair",    description: "Restore 5 base HP",       color: 0x22c55e, effect: { kind: "repair", amount: 5 } },
 ];
