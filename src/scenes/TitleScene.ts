@@ -3,18 +3,22 @@ import { SCREEN } from "../data/balance";
 import { loadSave } from "../data/storage";
 import { createButton } from "../ui/Button";
 
-const ICON_KEYS = [
-  "sniper",
-  "cannon",
-  "frost",
-  "tesla",
-  "laser",
-  "frostgun",
-  "fireworks",
-  "inferno",
-  "tornado",
-  "mechanest",
-] as const;
+// Filename per tower icon. PNG (raster art) where we have it, SVG
+// (procedural-style placeholder) for the rest. drawIcon picks up the
+// loaded texture by key, so swapping a tower over to PNG just means
+// flipping the value here.
+const ICON_FILES: Record<string, string> = {
+  sniper:    "sniper.png",
+  cannon:    "cannon.png",
+  frost:     "frost.png",
+  mechanest: "mechanest.png",
+  laser:     "laser.png",
+  inferno:   "inferno.png",
+  tesla:     "tesla.svg",
+  frostgun:  "frostgun.svg",
+  fireworks: "fireworks.svg",
+  tornado:   "tornado.svg",
+};
 
 export class TitleScene extends Phaser.Scene {
   constructor() {
@@ -22,8 +26,8 @@ export class TitleScene extends Phaser.Scene {
   }
 
   preload(): void {
-    for (const key of ICON_KEYS) {
-      this.load.image(`icon-${key}`, `assets/icons/${key}.svg`);
+    for (const [key, file] of Object.entries(ICON_FILES)) {
+      this.load.image(`icon-${key}`, `assets/icons/${file}`);
     }
   }
 
