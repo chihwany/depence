@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { TOWERS, type TowerStats, type TowerType } from "../data/balance";
 import { Enemy } from "./Enemy";
+import { drawIcon, towerIconKind } from "../ui/Icons";
 
 export class Tower {
   x: number;
@@ -28,14 +29,7 @@ export class Tower {
     this.shape.setStrokeStyle(3, 0xffffff);
     this.shape.setInteractive({ useHandCursor: true });
 
-    scene.add
-      .text(x, y, this.baseStats.label, {
-        fontFamily: "sans-serif",
-        fontSize: "16px",
-        fontStyle: "bold",
-        color: "#ffffff",
-      })
-      .setOrigin(0.5);
+    drawIcon(scene, towerIconKind(this.type), x, y, this.baseStats.radius * 1.3, 0xffffff);
 
     this.levelText = scene.add
       .text(x + this.baseStats.radius + 2, y - this.baseStats.radius - 2, "1", {

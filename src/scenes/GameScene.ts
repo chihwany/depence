@@ -22,6 +22,7 @@ import { Enemy } from "../entities/Enemy";
 import { Tower } from "../entities/Tower";
 import { Projectile } from "../entities/Projectile";
 import { createButton } from "../ui/Button";
+import { drawIcon, towerIconKind, shapeIconKind, cardIconKind } from "../ui/Icons";
 import type { ResultData } from "./ResultScene";
 
 type Phase = "build" | "wave" | "cardPick" | "ended";
@@ -752,6 +753,10 @@ export class GameScene extends Phaser.Scene {
       const bg = this.add.rectangle(0, 0, cardW, cardH, 0x1f2937);
       bg.setStrokeStyle(4, card.color);
       const colorBlock = this.add.rectangle(0, -80, cardW - 20, 80, card.color);
+
+      const iconKind = cardIconKind(card);
+      const icon = iconKind ? drawIcon(this, iconKind, 0, -80, 60, 0xffffff) : null;
+
       const labelTxt = this.add
         .text(0, -8, card.label, {
           fontFamily: "sans-serif",
@@ -770,12 +775,11 @@ export class GameScene extends Phaser.Scene {
         })
         .setOrigin(0.5);
 
-      const container = this.add.container(cx, cardY, [
-        bg,
-        colorBlock,
-        labelTxt,
-        descTxt,
-      ]);
+      const children: Phaser.GameObjects.GameObject[] = [bg, colorBlock];
+      if (icon) children.push(icon);
+      children.push(labelTxt, descTxt);
+
+      const container = this.add.container(cx, cardY, children);
       container.setSize(cardW, cardH);
       container.setInteractive({ useHandCursor: true });
       container.on("pointerdown", () => this.pickCard(card));
@@ -847,17 +851,10 @@ export class GameScene extends Phaser.Scene {
       token.setInteractive({ useHandCursor: true });
       token.on("pointerdown", () => this.selectTowerToken(type));
 
-      const lbl = this.add
-        .text(xPos, yPos, stats.label, {
-          fontFamily: "sans-serif",
-          fontSize: "18px",
-          fontStyle: "bold",
-          color: "#ffffff",
-        })
-        .setOrigin(0.5);
+      const icon = drawIcon(this, towerIconKind(type), xPos, yPos, tokenSize * 1.1, 0xffffff);
 
       this.handContainer.add(token);
-      this.handContainer.add(lbl);
+      this.handContainer.add(icon);
       xPos += tokenSize * 2 + tokenGap;
     }
 
@@ -878,16 +875,19 @@ export class GameScene extends Phaser.Scene {
       token.setInteractive({ useHandCursor: true });
       token.on("pointerdown", () => this.selectShapeToken(shapeId));
 
-      const lbl = this.add
-        .text(xPos, yPos, `${shape.label}×${count}`, {
+      const icon = drawIcon(this, shapeIconKind(shapeId), xPos, yPos - 4, tokenSize * 0.95, 0xffffff);
+      const countLbl = this.add
+        .text(xPos, yPos + tokenSize * 0.5, `×${count}`, {
           fontFamily: "sans-serif",
-          fontSize: "13px",
+          fontSize: "12px",
           fontStyle: "bold",
           color: "#ffffff",
         })
         .setOrigin(0.5);
+
       this.handContainer.add(token);
-      this.handContainer.add(lbl);
+      this.handContainer.add(icon);
+      this.handContainer.add(countLbl);
       xPos += tokenSize * 2 + tokenGap;
     }
 
@@ -901,16 +901,18 @@ export class GameScene extends Phaser.Scene {
       );
       token.setInteractive({ useHandCursor: true });
       token.on("pointerdown", () => this.selectUpgradeToken());
-      const lbl = this.add
-        .text(xPos, yPos, `+×${this.upgradeTokens}`, {
+      const icon = drawIcon(this, "upgrade", xPos, yPos - 4, tokenSize * 0.95, 0xffffff);
+      const countLbl = this.add
+        .text(xPos, yPos + tokenSize * 0.5, `×${this.upgradeTokens}`, {
           fontFamily: "sans-serif",
-          fontSize: "13px",
+          fontSize: "12px",
           fontStyle: "bold",
           color: "#ffffff",
         })
         .setOrigin(0.5);
       this.handContainer.add(token);
-      this.handContainer.add(lbl);
+      this.handContainer.add(icon);
+      this.handContainer.add(countLbl);
       xPos += tokenSize * 2 + tokenGap;
     }
 
