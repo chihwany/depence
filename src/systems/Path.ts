@@ -22,7 +22,11 @@ export const INITIAL_PATH_CELLS: GridPosition[] = [
   { col: 3, row: 11 }, // base
 ];
 
-export const STARTING_ROAD_TOKENS = 5;
+export const STARTING_SHAPE_TOKENS: { I: number; L: number; U: number } = {
+  I: 4,
+  L: 1,
+  U: 1,
+};
 
 export function buildCurvePathFromCells(
   grid: Grid,

@@ -91,10 +91,45 @@ export const WAVES: WaveDef[] = [
   { spawns: [{ type: "boss", count: 1, interval: 0 }], isBoss: true },
 ];
 
+export type ShapeId = "I" | "L" | "U";
+
+import type { ShapeDef } from "../systems/Shape";
+
+// Shape definitions: cell offsets relative to spawn in default (north)
+// orientation. Last cell becomes the new spawn after placement.
+// At placement time the player picks a rotation by tapping a cell.
+export const SHAPES: Record<ShapeId, ShapeDef> = {
+  I: {
+    id: "I",
+    label: "I",
+    color: 0x78716c,
+    offsets: [{ dCol: 0, dRow: -1 }],
+  },
+  L: {
+    id: "L",
+    label: "L",
+    color: 0xa78bfa,
+    offsets: [
+      { dCol: 0, dRow: -1 },
+      { dCol: 1, dRow: -1 },
+    ],
+  },
+  U: {
+    id: "U",
+    label: "U",
+    color: 0xfb923c,
+    offsets: [
+      { dCol: 0, dRow: -1 },
+      { dCol: 1, dRow: -1 },
+      { dCol: 1, dRow: 0 },
+    ],
+  },
+};
+
 export type CardEffect =
   | { kind: "addTower"; towerType: TowerType }
   | { kind: "upgrade" }
-  | { kind: "addRoad"; amount: number }
+  | { kind: "addShape"; shapeId: ShapeId; amount: number }
   | { kind: "damageBoost"; mul: number }
   | { kind: "repair"; amount: number };
 
@@ -107,11 +142,13 @@ export interface CardDef {
 }
 
 export const CARD_POOL: CardDef[] = [
-  { id: "sniper",  label: "Sniper",   description: "1× Sniper tower",         color: 0x3b82f6, effect: { kind: "addTower", towerType: "sniper" } },
-  { id: "cannon",  label: "Cannon",   description: "1× Cannon (AOE)",         color: 0xf97316, effect: { kind: "addTower", towerType: "cannon" } },
-  { id: "frost",   label: "Frost",    description: "1× Frost (slow)",         color: 0x06b6d4, effect: { kind: "addTower", towerType: "frost" } },
-  { id: "road",    label: "Road",     description: "+3 road tiles (extend spawn)", color: 0x78716c, effect: { kind: "addRoad", amount: 3 } },
-  { id: "upgrade", label: "Upgrade",  description: "+1 level on a tower",     color: 0xa855f7, effect: { kind: "upgrade" } },
-  { id: "boost",   label: "Power Up", description: "All towers +25% damage",  color: 0xfacc15, effect: { kind: "damageBoost", mul: 1.25 } },
-  { id: "repair",  label: "Repair",   description: "Restore 5 base HP",       color: 0x22c55e, effect: { kind: "repair", amount: 5 } },
+  { id: "sniper",   label: "Sniper",   description: "1× Sniper tower",        color: 0x3b82f6, effect: { kind: "addTower", towerType: "sniper" } },
+  { id: "cannon",   label: "Cannon",   description: "1× Cannon (AOE)",        color: 0xf97316, effect: { kind: "addTower", towerType: "cannon" } },
+  { id: "frost",    label: "Frost",    description: "1× Frost (slow)",        color: 0x06b6d4, effect: { kind: "addTower", towerType: "frost" } },
+  { id: "shape-i",  label: "Straight", description: "+2 Straight pieces (1 cell)",  color: 0x78716c, effect: { kind: "addShape", shapeId: "I", amount: 2 } },
+  { id: "shape-l",  label: "L Turn",   description: "+1 L-Turn piece (2 cells)",    color: 0xa78bfa, effect: { kind: "addShape", shapeId: "L", amount: 1 } },
+  { id: "shape-u",  label: "U Turn",   description: "+1 U-Turn piece (3 cells)",    color: 0xfb923c, effect: { kind: "addShape", shapeId: "U", amount: 1 } },
+  { id: "upgrade",  label: "Upgrade",  description: "+1 level on a tower",    color: 0xa855f7, effect: { kind: "upgrade" } },
+  { id: "boost",    label: "Power Up", description: "All towers +25% damage", color: 0xfacc15, effect: { kind: "damageBoost", mul: 1.25 } },
+  { id: "repair",   label: "Repair",   description: "Restore 5 base HP",      color: 0x22c55e, effect: { kind: "repair", amount: 5 } },
 ];

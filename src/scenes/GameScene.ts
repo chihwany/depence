@@ -2,20 +2,21 @@ import Phaser from "phaser";
 import {
   BASE,
   SCREEN,
+  SHAPES,
   TOWERS,
   WAVES,
   type CardDef,
+  type ShapeId,
   type TowerType,
 } from "../data/balance";
 import {
   GRID_CONFIG,
   INITIAL_PATH_CELLS,
-  STARTING_ROAD_TOKENS,
+  STARTING_SHAPE_TOKENS,
   buildCurvePathFromCells,
-  isAdjacent,
-  getNeighbors,
 } from "../systems/Path";
 import { Grid, type GridPosition } from "../systems/Grid";
+import { getValidPlacements, type Placement } from "../systems/Shape";
 import { WaveRunner } from "../systems/WaveRunner";
 import { drawCards } from "../systems/CardPool";
 import { Enemy } from "../entities/Enemy";
@@ -28,7 +29,7 @@ type Phase = "build" | "wave" | "cardPick" | "ended";
 type Selection =
   | { kind: "tower"; towerType: TowerType }
   | { kind: "upgrade" }
-  | { kind: "road" }
+  | { kind: "shape"; shapeId: ShapeId }
   | null;
 
 export class GameScene extends Phaser.Scene {
@@ -50,7 +51,7 @@ export class GameScene extends Phaser.Scene {
 
   private towerTokens: TowerType[] = [];
   private upgradeTokens = 0;
-  private roadTokens = 0;
+  private shapeTokens: Record<ShapeId, number> = { I: 0, L: 0, U: 0 };
   private selection: Selection = null;
 
   private hpText!: Phaser.GameObjects.Text;
@@ -173,7 +174,7 @@ export class GameScene extends Phaser.Scene {
     this.waveRunner = null;
     this.towerTokens = ["sniper"];
     this.upgradeTokens = 0;
-    this.roadTokens = STARTING_ROAD_TOKENS;
+    this.shapeTokens = { ...STARTING_SHAPE_TOKENS };
     this.selection = null;
     this.cardModal = null;
     this.pauseModal = null;
@@ -249,17 +250,26 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Highlight cells where the player can extend the spawn (build phase only)
-    if (this.phase === "build" && this.pathCells.length > 0) {
-      const spawn = this.currentSpawn();
-      for (const adj of getNeighbors(spawn)) {
-        const cell = this.grid.getCell(adj.col, adj.row);
-        if (!cell || cell.type !== "empty") continue;
-        const w = this.grid.cellToWorld(adj.col, adj.row);
-        const x = w.x - size / 2 + 1;
-        const y = w.y - size / 2 + 1;
-        this.gridGraphics.lineStyle(3, 0xfde047, 0.85);
-        this.gridGraphics.strokeRect(x, y, inner, inner);
+    // Highlight valid placements for the currently selected shape
+    if (
+      this.phase === "build" &&
+      this.selection?.kind === "shape" &&
+      this.shapeTokens[this.selection.shapeId] > 0
+    ) {
+      const shape = SHAPES[this.selection.shapeId];
+      const placements = getValidPlacements(this.grid, this.currentSpawn(), shape);
+      for (const placement of placements) {
+        for (let i = 0; i < placement.cells.length; i++) {
+          const c = placement.cells[i];
+          if (!c) continue;
+          const w = this.grid.cellToWorld(c.col, c.row);
+          const x = w.x - size / 2 + 1;
+          const y = w.y - size / 2 + 1;
+          // First cell (adjacent to spawn) brighter; rest fainter to suggest path
+          const alpha = i === 0 ? 0.95 : 0.5;
+          this.gridGraphics.lineStyle(3, 0xfde047, alpha);
+          this.gridGraphics.strokeRect(x, y, inner, inner);
+        }
       }
     }
   }
@@ -734,8 +744,8 @@ export class GameScene extends Phaser.Scene {
       case "upgrade":
         this.upgradeTokens++;
         break;
-      case "addRoad":
-        this.roadTokens += card.effect.amount;
+      case "addShape":
+        this.shapeTokens[card.effect.shapeId] += card.effect.amount;
         break;
       case "damageBoost":
         this.damageMul *= card.effect.mul;
@@ -795,18 +805,25 @@ export class GameScene extends Phaser.Scene {
       xPos += tokenSize * 2 + tokenGap;
     }
 
-    if (this.roadTokens > 0) {
-      const isSelected = this.selection?.kind === "road";
-      const token = this.add.circle(xPos, yPos, tokenSize, 0x78716c);
+    const shapeOrder: ShapeId[] = ["I", "L", "U"];
+    for (const shapeId of shapeOrder) {
+      const count = this.shapeTokens[shapeId];
+      if (count <= 0) continue;
+      const shape = SHAPES[shapeId];
+      const isSelected =
+        this.selection?.kind === "shape" && this.selection.shapeId === shapeId;
+
+      const token = this.add.circle(xPos, yPos, tokenSize, shape.color);
       token.setStrokeStyle(
         isSelected ? 4 : 2,
         0xffffff,
         isSelected ? 1 : 0.5,
       );
       token.setInteractive({ useHandCursor: true });
-      token.on("pointerdown", () => this.selectRoadToken());
+      token.on("pointerdown", () => this.selectShapeToken(shapeId));
+
       const lbl = this.add
-        .text(xPos, yPos, `R×${this.roadTokens}`, {
+        .text(xPos, yPos, `${shape.label}×${count}`, {
           fontFamily: "sans-serif",
           fontSize: "13px",
           fontStyle: "bold",
@@ -829,7 +846,7 @@ export class GameScene extends Phaser.Scene {
       token.setInteractive({ useHandCursor: true });
       token.on("pointerdown", () => this.selectUpgradeToken());
       const lbl = this.add
-        .text(xPos, yPos, `U×${this.upgradeTokens}`, {
+        .text(xPos, yPos, `+×${this.upgradeTokens}`, {
           fontFamily: "sans-serif",
           fontSize: "13px",
           fontStyle: "bold",
@@ -841,10 +858,12 @@ export class GameScene extends Phaser.Scene {
       xPos += tokenSize * 2 + tokenGap;
     }
 
+    const totalShapeTokens =
+      this.shapeTokens.I + this.shapeTokens.L + this.shapeTokens.U;
     if (
       this.towerTokens.length === 0 &&
       this.upgradeTokens === 0 &&
-      this.roadTokens === 0
+      totalShapeTokens === 0
     ) {
       const empty = this.add
         .text(50, yPos, "no cards in hand", {
@@ -860,7 +879,7 @@ export class GameScene extends Phaser.Scene {
       const hintText =
         this.selection.kind === "tower"
           ? "tap an empty cell to place"
-          : this.selection.kind === "road"
+          : this.selection.kind === "shape"
             ? "tap a yellow cell to extend"
             : "tap a tower to upgrade";
       const hint = this.add
@@ -895,13 +914,17 @@ export class GameScene extends Phaser.Scene {
     this.refreshHand();
   }
 
-  private selectRoadToken(): void {
-    if (this.selection?.kind === "road") {
+  private selectShapeToken(shapeId: ShapeId): void {
+    if (
+      this.selection?.kind === "shape" &&
+      this.selection.shapeId === shapeId
+    ) {
       this.selection = null;
     } else {
-      this.selection = { kind: "road" };
+      this.selection = { kind: "shape", shapeId };
     }
     this.refreshHand();
+    this.redrawGrid();
   }
 
   // === Slot / tower interactions ===
@@ -931,11 +954,15 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Extend spawn: road token selected + empty cell adjacent to spawn
-    if (this.selection?.kind === "road") {
-      if (cell.type !== "empty") return;
-      if (!isAdjacent(pos, this.currentSpawn())) return;
-      this.extendSpawn(pos);
+    // Shape placement: shape token selected + tap a cell that belongs to a valid placement
+    if (this.selection?.kind === "shape") {
+      const shape = SHAPES[this.selection.shapeId];
+      if (this.shapeTokens[shape.id as ShapeId] <= 0) return;
+      const placements = getValidPlacements(this.grid, this.currentSpawn(), shape);
+      const matched = placements.find((p) =>
+        p.cells.some((c) => c.col === pos.col && c.row === pos.row),
+      );
+      if (matched) this.placeShape(shape.id as ShapeId, matched);
       return;
     }
 
@@ -949,22 +976,43 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private extendSpawn(newCell: GridPosition): void {
-    if (this.roadTokens <= 0) return;
-    const oldSpawn = this.currentSpawn();
-    const newWorld = this.grid.cellToWorld(newCell.col, newCell.row);
+  private placeShape(shapeId: ShapeId, placement: Placement): void {
+    if (this.shapeTokens[shapeId] <= 0) return;
 
-    this.pathCells.unshift({ col: newCell.col, row: newCell.row });
+    const cells = placement.cells;
+    const oldSpawn = this.currentSpawn();
+    const newSpawnCell = cells[cells.length - 1];
+    if (!newSpawnCell) return;
+    const newWorld = this.grid.cellToWorld(newSpawnCell.col, newSpawnCell.row);
+
+    // Old spawn becomes road
     this.grid.setCellType(oldSpawn.col, oldSpawn.row, "road");
-    this.grid.setCellType(newCell.col, newCell.row, "spawn");
-    this.roadTokens--;
-    if (this.roadTokens === 0) this.selection = null;
+    // Intermediate cells become road
+    for (let i = 0; i < cells.length - 1; i++) {
+      const c = cells[i];
+      if (!c) continue;
+      this.grid.setCellType(c.col, c.row, "road");
+    }
+    // Last cell of shape is the new spawn
+    this.grid.setCellType(newSpawnCell.col, newSpawnCell.row, "spawn");
+
+    // Prepend shape cells in REVERSE order (so newSpawn ends up at index 0)
+    for (let i = cells.length - 1; i >= 0; i--) {
+      const c = cells[i];
+      if (!c) continue;
+      this.pathCells.unshift({ col: c.col, row: c.row });
+    }
+
+    this.shapeTokens[shapeId]--;
+    if (this.shapeTokens[shapeId] === 0) this.selection = null;
 
     this.animateSpawnMove(newWorld.x, newWorld.y);
     this.refreshHand();
     this.redrawGrid();
   }
 
+  // Tap-on-spawn undo: removes the front cell only (no token refund).
+  // Multi-cell shapes can be undone by tapping repeatedly.
   private contractSpawn(): void {
     if (this.pathCells.length <= 2) return;
     const oldSpawn = this.pathCells.shift();
@@ -973,8 +1021,6 @@ export class GameScene extends Phaser.Scene {
     const newSpawn = this.currentSpawn();
     this.grid.setCellType(newSpawn.col, newSpawn.row, "spawn");
     const newWorld = this.grid.cellToWorld(newSpawn.col, newSpawn.row);
-
-    this.roadTokens++;
 
     this.animateSpawnMove(newWorld.x, newWorld.y);
     this.refreshHand();
