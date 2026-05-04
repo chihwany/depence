@@ -49,6 +49,10 @@ export class GameScene extends Phaser.Scene {
   private isPaused = false;
   private matchStartTime = 0;
 
+  private gameTime = 0;
+  private speedMul = 1;
+  private speedButton!: Phaser.GameObjects.Container;
+
   constructor() {
     super("GameScene");
   }
@@ -61,6 +65,7 @@ export class GameScene extends Phaser.Scene {
     this.drawBase();
     this.drawSlots();
     this.drawHud();
+    this.drawSpeedButton();
     this.drawPauseButton();
     this.handContainer = this.add.container(0, 0);
     this.drawStartButton();
@@ -76,20 +81,24 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
-  override update(time: number, delta: number): void {
+  override update(_time: number, delta: number): void {
     if (this.isPaused) return;
     if (this.phase === "ended" || this.phase === "cardPick") return;
-    const dt = delta / 1000;
+
+    const scaledDeltaMs = delta * this.speedMul;
+    this.gameTime += scaledDeltaMs;
+    const dt = scaledDeltaMs / 1000;
+    const t = this.gameTime;
 
     if (this.phase === "wave" && this.waveRunner) {
-      const newSpawns = this.waveRunner.tick(time);
+      const newSpawns = this.waveRunner.tick(t);
       for (const stats of newSpawns) {
         this.enemies.push(new Enemy(this, this.path, stats));
       }
     }
 
     for (const e of this.enemies) {
-      e.update(dt, time);
+      e.update(dt, t);
       if (e.reachedEnd && !e.isDead) {
         this.baseHp -= e.stats.damage;
         e.isDead = true;
@@ -97,8 +106,8 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    for (const t of this.towers) {
-      t.update(time, this.enemies, (target) => this.fireFrom(t, target));
+    for (const tower of this.towers) {
+      tower.update(t, this.enemies, (target) => this.fireFrom(tower, target));
     }
 
     for (const p of this.projectiles) {
@@ -107,6 +116,9 @@ export class GameScene extends Phaser.Scene {
 
     this.enemies = this.enemies.filter((e) => {
       if (e.isDead) {
+        if (!e.reachedEnd) {
+          this.spawnDeathEffect(e.shape.x, e.shape.y, e.stats.color);
+        }
         e.destroy();
         return false;
       }
@@ -147,6 +159,9 @@ export class GameScene extends Phaser.Scene {
     this.cardModal = null;
     this.pauseModal = null;
     this.isPaused = false;
+    this.gameTime = 0;
+    this.speedMul = 1;
+    this.tweens.timeScale = 1;
   }
 
   private drawPath(): void {
@@ -259,7 +274,8 @@ export class GameScene extends Phaser.Scene {
     this.selection = null;
     const wave = WAVES[this.waveIndex];
     if (!wave) return;
-    this.waveRunner = new WaveRunner(wave, this.time.now);
+    this.waveRunner = new WaveRunner(wave, this.gameTime);
+    this.showWaveBanner(this.waveIndex + 1, wave.isBoss === true);
     this.updateHud();
     this.refreshHand();
     this.updateStartButton();
@@ -378,14 +394,16 @@ export class GameScene extends Phaser.Scene {
   private fireFrom(tower: Tower, target: Enemy): void {
     const damage = tower.damage * this.damageMul;
     const stats = TOWERS[tower.type];
+    this.spawnFireFlash(tower);
     const onHit = (hitTarget: Enemy, hx: number, hy: number) => {
-      const now = this.time.now;
+      const now = this.gameTime;
       if (stats.aoeRadius) {
         for (const e of this.enemies) {
           if (e.isDead || e.reachedEnd) continue;
           const d = Math.hypot(e.shape.x - hx, e.shape.y - hy);
           if (d <= stats.aoeRadius) {
             e.takeDamage(damage);
+            this.spawnDamagePopup(e.shape.x, e.shape.y, damage);
             if (stats.slowMul && stats.slowDuration) {
               e.applySlow(stats.slowMul, stats.slowDuration, now);
             }
@@ -401,6 +419,7 @@ export class GameScene extends Phaser.Scene {
         });
       } else {
         hitTarget.takeDamage(damage);
+        this.spawnDamagePopup(hitTarget.shape.x, hitTarget.shape.y, damage);
         if (stats.slowMul && stats.slowDuration) {
           hitTarget.applySlow(stats.slowMul, stats.slowDuration, now);
         }
@@ -409,6 +428,104 @@ export class GameScene extends Phaser.Scene {
     this.projectiles.push(
       new Projectile(this, tower.x, tower.y, target, onHit, stats.color),
     );
+  }
+
+  // === Polish effects ===
+
+  private spawnDamagePopup(x: number, y: number, amount: number): void {
+    const text = this.add
+      .text(x, y - 16, Math.ceil(amount).toString(), {
+        fontFamily: "sans-serif",
+        fontSize: "16px",
+        fontStyle: "bold",
+        color: "#fef3c7",
+      })
+      .setOrigin(0.5);
+    this.tweens.add({
+      targets: text,
+      y: y - 56,
+      alpha: { from: 1, to: 0 },
+      duration: 600,
+      ease: "Sine.out",
+      onComplete: () => text.destroy(),
+    });
+  }
+
+  private spawnDeathEffect(x: number, y: number, color: number): void {
+    const ring = this.add.circle(x, y, 10, color, 0.7);
+    this.tweens.add({
+      targets: ring,
+      scale: { from: 1, to: 3 },
+      alpha: 0,
+      duration: 320,
+      ease: "Quad.out",
+      onComplete: () => ring.destroy(),
+    });
+  }
+
+  private spawnFireFlash(tower: Tower): void {
+    this.tweens.add({
+      targets: tower.shape,
+      scale: { from: 1.2, to: 1 },
+      duration: 120,
+      ease: "Quad.out",
+    });
+  }
+
+  private showWaveBanner(waveNum: number, isBoss: boolean): void {
+    const text = this.add
+      .text(
+        SCREEN.width / 2,
+        SCREEN.height / 2 - 80,
+        isBoss ? "BOSS WAVE" : `WAVE ${waveNum}`,
+        {
+          fontFamily: "sans-serif",
+          fontSize: isBoss ? "60px" : "72px",
+          fontStyle: "bold",
+          color: isBoss ? "#ef4444" : "#ffffff",
+        },
+      )
+      .setOrigin(0.5)
+      .setAlpha(0);
+
+    this.tweens.add({
+      targets: text,
+      alpha: 1,
+      scale: { from: 1.6, to: 1 },
+      duration: 280,
+      ease: "Back.out",
+      onComplete: () => {
+        this.tweens.add({
+          targets: text,
+          alpha: 0,
+          duration: 400,
+          delay: 700,
+          onComplete: () => text.destroy(),
+        });
+      },
+    });
+  }
+
+  // === Speed control ===
+
+  private drawSpeedButton(): void {
+    this.speedButton = createButton(this, SCREEN.width - 170, 40, {
+      label: "1×",
+      width: 80,
+      height: 44,
+      fillColor: 0x475569,
+      textColor: "#ffffff",
+      fontSize: 18,
+      onClick: () => this.toggleSpeed(),
+    });
+  }
+
+  private toggleSpeed(): void {
+    if (this.phase === "ended") return;
+    this.speedMul = this.speedMul === 1 ? 2 : 1;
+    this.tweens.timeScale = this.speedMul;
+    const lbl = this.speedButton.list[1] as Phaser.GameObjects.Text;
+    lbl.setText(`${this.speedMul}×`);
   }
 
   // === Card pick ===
