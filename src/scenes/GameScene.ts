@@ -10,6 +10,7 @@ import {
 import {
   GRID_CONFIG,
   INITIAL_PATH_CELLS,
+  STARTING_ROAD_TOKENS,
   buildCurvePathFromCells,
   isAdjacent,
   getNeighbors,
@@ -27,6 +28,7 @@ type Phase = "build" | "wave" | "cardPick" | "ended";
 type Selection =
   | { kind: "tower"; towerType: TowerType }
   | { kind: "upgrade" }
+  | { kind: "road" }
   | null;
 
 export class GameScene extends Phaser.Scene {
@@ -48,6 +50,7 @@ export class GameScene extends Phaser.Scene {
 
   private towerTokens: TowerType[] = [];
   private upgradeTokens = 0;
+  private roadTokens = 0;
   private selection: Selection = null;
 
   private hpText!: Phaser.GameObjects.Text;
@@ -170,6 +173,7 @@ export class GameScene extends Phaser.Scene {
     this.waveRunner = null;
     this.towerTokens = ["sniper"];
     this.upgradeTokens = 0;
+    this.roadTokens = STARTING_ROAD_TOKENS;
     this.selection = null;
     this.cardModal = null;
     this.pauseModal = null;
@@ -281,10 +285,6 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5);
   }
 
-  private refreshSpawnTextPosition(): void {
-    const s = this.grid.cellToWorld(this.currentSpawn().col, this.currentSpawn().row);
-    this.spawnText.setPosition(s.x, s.y);
-  }
 
   private setupGridInput(): void {
     const cfg = this.grid.config;
@@ -734,6 +734,9 @@ export class GameScene extends Phaser.Scene {
       case "upgrade":
         this.upgradeTokens++;
         break;
+      case "addRoad":
+        this.roadTokens += card.effect.amount;
+        break;
       case "damageBoost":
         this.damageMul *= card.effect.mul;
         break;
@@ -792,6 +795,29 @@ export class GameScene extends Phaser.Scene {
       xPos += tokenSize * 2 + tokenGap;
     }
 
+    if (this.roadTokens > 0) {
+      const isSelected = this.selection?.kind === "road";
+      const token = this.add.circle(xPos, yPos, tokenSize, 0x78716c);
+      token.setStrokeStyle(
+        isSelected ? 4 : 2,
+        0xffffff,
+        isSelected ? 1 : 0.5,
+      );
+      token.setInteractive({ useHandCursor: true });
+      token.on("pointerdown", () => this.selectRoadToken());
+      const lbl = this.add
+        .text(xPos, yPos, `R×${this.roadTokens}`, {
+          fontFamily: "sans-serif",
+          fontSize: "13px",
+          fontStyle: "bold",
+          color: "#ffffff",
+        })
+        .setOrigin(0.5);
+      this.handContainer.add(token);
+      this.handContainer.add(lbl);
+      xPos += tokenSize * 2 + tokenGap;
+    }
+
     if (this.upgradeTokens > 0) {
       const isSelected = this.selection?.kind === "upgrade";
       const token = this.add.circle(xPos, yPos, tokenSize, 0xa855f7);
@@ -815,7 +841,11 @@ export class GameScene extends Phaser.Scene {
       xPos += tokenSize * 2 + tokenGap;
     }
 
-    if (this.towerTokens.length === 0 && this.upgradeTokens === 0) {
+    if (
+      this.towerTokens.length === 0 &&
+      this.upgradeTokens === 0 &&
+      this.roadTokens === 0
+    ) {
       const empty = this.add
         .text(50, yPos, "no cards in hand", {
           fontFamily: "sans-serif",
@@ -829,8 +859,10 @@ export class GameScene extends Phaser.Scene {
     if (this.selection) {
       const hintText =
         this.selection.kind === "tower"
-          ? "tap a slot to place"
-          : "tap a tower to upgrade";
+          ? "tap an empty cell to place"
+          : this.selection.kind === "road"
+            ? "tap a yellow cell to extend"
+            : "tap a tower to upgrade";
       const hint = this.add
         .text(SCREEN.width - 30, yPos, hintText, {
           fontFamily: "sans-serif",
@@ -863,6 +895,15 @@ export class GameScene extends Phaser.Scene {
     this.refreshHand();
   }
 
+  private selectRoadToken(): void {
+    if (this.selection?.kind === "road") {
+      this.selection = null;
+    } else {
+      this.selection = { kind: "road" };
+    }
+    this.refreshHand();
+  }
+
   // === Slot / tower interactions ===
 
   private onCellTap(pos: GridPosition): void {
@@ -890,24 +931,37 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Extend spawn: empty cell adjacent to current spawn
-    if (cell.type === "empty" && isAdjacent(pos, this.currentSpawn())) {
+    // Extend spawn: road token selected + empty cell adjacent to spawn
+    if (this.selection?.kind === "road") {
+      if (cell.type !== "empty") return;
+      if (!isAdjacent(pos, this.currentSpawn())) return;
       this.extendSpawn(pos);
       return;
     }
 
-    // Contract spawn: tap on current spawn cell (only if path > 2)
-    if (cell.type === "spawn" && this.pathCells.length > 2) {
+    // Contract spawn: no selection + tap on current spawn (path > 2)
+    if (
+      this.selection === null &&
+      cell.type === "spawn" &&
+      this.pathCells.length > 2
+    ) {
       this.contractSpawn();
     }
   }
 
   private extendSpawn(newCell: GridPosition): void {
+    if (this.roadTokens <= 0) return;
     const oldSpawn = this.currentSpawn();
+    const newWorld = this.grid.cellToWorld(newCell.col, newCell.row);
+
     this.pathCells.unshift({ col: newCell.col, row: newCell.row });
     this.grid.setCellType(oldSpawn.col, oldSpawn.row, "road");
     this.grid.setCellType(newCell.col, newCell.row, "spawn");
-    this.refreshSpawnTextPosition();
+    this.roadTokens--;
+    if (this.roadTokens === 0) this.selection = null;
+
+    this.animateSpawnMove(newWorld.x, newWorld.y);
+    this.refreshHand();
     this.redrawGrid();
   }
 
@@ -918,8 +972,31 @@ export class GameScene extends Phaser.Scene {
     this.grid.setCellType(oldSpawn.col, oldSpawn.row, "empty");
     const newSpawn = this.currentSpawn();
     this.grid.setCellType(newSpawn.col, newSpawn.row, "spawn");
-    this.refreshSpawnTextPosition();
+    const newWorld = this.grid.cellToWorld(newSpawn.col, newSpawn.row);
+
+    this.roadTokens++;
+
+    this.animateSpawnMove(newWorld.x, newWorld.y);
+    this.refreshHand();
     this.redrawGrid();
+  }
+
+  private animateSpawnMove(x: number, y: number): void {
+    const size = this.grid.config.cellSize;
+    const flash = this.add.rectangle(x, y, size - 2, size - 2, 0xffffff, 0.7);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: 320,
+      onComplete: () => flash.destroy(),
+    });
+    this.tweens.add({
+      targets: this.spawnText,
+      x,
+      y,
+      duration: 220,
+      ease: "Cubic.out",
+    });
   }
 
   private onTowerTap(tower: Tower): void {

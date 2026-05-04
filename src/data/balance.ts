@@ -94,6 +94,7 @@ export const WAVES: WaveDef[] = [
 export type CardEffect =
   | { kind: "addTower"; towerType: TowerType }
   | { kind: "upgrade" }
+  | { kind: "addRoad"; amount: number }
   | { kind: "damageBoost"; mul: number }
   | { kind: "repair"; amount: number };
 
@@ -109,6 +110,7 @@ export const CARD_POOL: CardDef[] = [
   { id: "sniper",  label: "Sniper",   description: "1× Sniper tower",         color: 0x3b82f6, effect: { kind: "addTower", towerType: "sniper" } },
   { id: "cannon",  label: "Cannon",   description: "1× Cannon (AOE)",         color: 0xf97316, effect: { kind: "addTower", towerType: "cannon" } },
   { id: "frost",   label: "Frost",    description: "1× Frost (slow)",         color: 0x06b6d4, effect: { kind: "addTower", towerType: "frost" } },
+  { id: "road",    label: "Road",     description: "+3 road tiles (extend spawn)", color: 0x78716c, effect: { kind: "addRoad", amount: 3 } },
   { id: "upgrade", label: "Upgrade",  description: "+1 level on a tower",     color: 0xa855f7, effect: { kind: "upgrade" } },
   { id: "boost",   label: "Power Up", description: "All towers +25% damage",  color: 0xfacc15, effect: { kind: "damageBoost", mul: 1.25 } },
   { id: "repair",  label: "Repair",   description: "Restore 5 base HP",       color: 0x22c55e, effect: { kind: "repair", amount: 5 } },

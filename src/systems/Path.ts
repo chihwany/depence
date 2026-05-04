@@ -3,24 +3,26 @@ import type { Grid, GridConfig, GridPosition } from "./Grid";
 
 export const GRID_CONFIG: GridConfig = {
   cols: 8,
-  rows: 10,
-  cellSize: 80,
-  offsetX: 40,
+  rows: 12,
+  cellSize: 70,
+  offsetX: 80,
   offsetY: 180,
 };
 
 // Initial path: short straight segment near the bottom of the grid.
 // First element is spawn, last is base. Player extends behind spawn
 // (prepends to this list) to lengthen the route over time.
+// Starts short (6 cells) so the player has reason to extend immediately.
 export const INITIAL_PATH_CELLS: GridPosition[] = [
-  { col: 3, row: 3 }, // spawn
-  { col: 3, row: 4 },
-  { col: 3, row: 5 },
-  { col: 3, row: 6 },
+  { col: 3, row: 6 }, // spawn
   { col: 3, row: 7 },
   { col: 3, row: 8 },
-  { col: 3, row: 9 }, // base
+  { col: 3, row: 9 },
+  { col: 3, row: 10 },
+  { col: 3, row: 11 }, // base
 ];
+
+export const STARTING_ROAD_TOKENS = 5;
 
 export function buildCurvePathFromCells(
   grid: Grid,
