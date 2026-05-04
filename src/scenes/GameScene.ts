@@ -1,11 +1,24 @@
 import Phaser from "phaser";
-import { BASE, ENEMIES, SCREEN, TOWERS, WAVE } from "../data/balance";
+import {
+  BASE,
+  SCREEN,
+  TOWERS,
+  WAVES,
+  type CardDef,
+  type TowerType,
+} from "../data/balance";
 import { createPath, TOWER_SLOTS, type SlotPos } from "../systems/Path";
+import { WaveRunner } from "../systems/WaveRunner";
+import { drawCards } from "../systems/CardPool";
 import { Enemy } from "../entities/Enemy";
 import { Tower } from "../entities/Tower";
 import { Projectile } from "../entities/Projectile";
 
-type Phase = "build" | "wave" | "ended";
+type Phase = "build" | "wave" | "cardPick" | "ended";
+type Selection =
+  | { kind: "tower"; towerType: TowerType }
+  | { kind: "upgrade" }
+  | null;
 
 export class GameScene extends Phaser.Scene {
   private path!: Phaser.Curves.Path;
@@ -14,15 +27,22 @@ export class GameScene extends Phaser.Scene {
   private projectiles: Projectile[] = [];
   private slotMarkers = new Map<SlotPos, Phaser.GameObjects.Arc>();
 
-  private baseHp = BASE.maxHp;
-  private spawned = 0;
-  private nextSpawnTime = 0;
   private phase: Phase = "build";
+  private waveIndex = 0;
+  private baseHp: number = BASE.maxHp;
+  private damageMul = 1;
+  private waveRunner: WaveRunner | null = null;
+
+  private towerTokens: TowerType[] = [];
+  private upgradeTokens = 0;
+  private selection: Selection = null;
 
   private hpText!: Phaser.GameObjects.Text;
   private waveText!: Phaser.GameObjects.Text;
   private statusText!: Phaser.GameObjects.Text;
   private startButton!: Phaser.GameObjects.Container;
+  private handContainer!: Phaser.GameObjects.Container;
+  private cardModal: Phaser.GameObjects.Container | null = null;
 
   constructor() {
     super("GameScene");
@@ -30,25 +50,38 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.resetState();
-
     this.path = createPath();
     this.drawPath();
     this.drawBase();
     this.drawSlots();
     this.drawHud();
+    this.handContainer = this.add.container(0, 0);
     this.drawStartButton();
+    this.refreshHand();
+    this.updateStartButton();
+
+    this.input.on(
+      "gameobjectdown",
+      (_p: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject) => {
+        const tower = this.towers.find((t) => t.shape === obj);
+        if (tower) this.onTowerTap(tower);
+      },
+    );
   }
 
   override update(time: number, delta: number): void {
-    if (this.phase === "ended") return;
+    if (this.phase === "ended" || this.phase === "cardPick") return;
     const dt = delta / 1000;
 
-    if (this.phase === "wave") {
-      this.spawnTick(time);
+    if (this.phase === "wave" && this.waveRunner) {
+      const newSpawns = this.waveRunner.tick(time);
+      for (const stats of newSpawns) {
+        this.enemies.push(new Enemy(this, this.path, stats));
+      }
     }
 
     for (const e of this.enemies) {
-      e.update(dt);
+      e.update(dt, time);
       if (e.reachedEnd && !e.isDead) {
         this.baseHp -= e.stats.damage;
         e.isDead = true;
@@ -57,10 +90,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     for (const t of this.towers) {
-      t.update(time, this.enemies, (target) => {
-        const p = new Projectile(this, t.x, t.y, target, t.stats.damage);
-        this.projectiles.push(p);
-      });
+      t.update(time, this.enemies, (target) => this.fireFrom(t, target));
     }
 
     for (const p of this.projectiles) {
@@ -85,21 +115,28 @@ export class GameScene extends Phaser.Scene {
     if (this.phase === "wave") {
       if (this.baseHp <= 0) {
         this.endGame(false);
-      } else if (this.spawned >= WAVE.enemyCount && this.enemies.length === 0) {
-        this.endGame(true);
+      } else if (this.waveRunner?.isDone() && this.enemies.length === 0) {
+        this.endWave();
       }
     }
   }
+
+  // === Setup ===
 
   private resetState(): void {
     this.enemies = [];
     this.towers = [];
     this.projectiles = [];
     this.slotMarkers.clear();
-    this.baseHp = BASE.maxHp;
-    this.spawned = 0;
-    this.nextSpawnTime = 0;
     this.phase = "build";
+    this.waveIndex = 0;
+    this.baseHp = BASE.maxHp;
+    this.damageMul = 1;
+    this.waveRunner = null;
+    this.towerTokens = ["sniper"];
+    this.upgradeTokens = 0;
+    this.selection = null;
+    this.cardModal = null;
   }
 
   private drawPath(): void {
@@ -127,19 +164,9 @@ export class GameScene extends Phaser.Scene {
       const marker = this.add.circle(slot.x, slot.y, 22, 0xffffff, 0.08);
       marker.setStrokeStyle(2, 0xffffff, 0.35);
       marker.setInteractive({ useHandCursor: true });
-      marker.on("pointerdown", () => this.placeTower(slot));
+      marker.on("pointerdown", () => this.onSlotTap(slot));
       this.slotMarkers.set(slot, marker);
     }
-  }
-
-  private placeTower(slot: SlotPos): void {
-    if (this.phase === "ended") return;
-    const marker = this.slotMarkers.get(slot);
-    if (!marker) return;
-    const tower = new Tower(this, slot.x, slot.y, TOWERS.sniper);
-    this.towers.push(tower);
-    marker.destroy();
-    this.slotMarkers.delete(slot);
   }
 
   private drawHud(): void {
@@ -148,9 +175,9 @@ export class GameScene extends Phaser.Scene {
       fontSize: "26px",
       color: "#ffffff",
     });
-    this.waveText = this.add.text(20, 56, "Wave 1 — Build phase", {
+    this.waveText = this.add.text(20, 56, "", {
       fontFamily: "sans-serif",
-      fontSize: "18px",
+      fontSize: "16px",
       color: "#9ca3af",
     });
     this.statusText = this.add
@@ -164,46 +191,85 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drawStartButton(): void {
-    const x = SCREEN.width / 2;
-    const y = SCREEN.height - 80;
-    const bg = this.add.rectangle(0, 0, 240, 60, 0x4ade80);
+    const x = SCREEN.width - 160;
+    const y = SCREEN.height - 60;
+    const bg = this.add.rectangle(0, 0, 280, 70, 0x4ade80);
     bg.setStrokeStyle(2, 0xffffff);
     const label = this.add
-      .text(0, 0, "START WAVE", {
+      .text(0, 0, "START WAVE 1", {
         fontFamily: "sans-serif",
-        fontSize: "22px",
-        color: "#0f172a",
+        fontSize: "20px",
         fontStyle: "bold",
+        color: "#0f172a",
       })
       .setOrigin(0.5);
     this.startButton = this.add.container(x, y, [bg, label]);
-    this.startButton.setSize(240, 60);
+    this.startButton.setSize(280, 70);
     this.startButton.setInteractive({ useHandCursor: true });
     this.startButton.on("pointerdown", () => this.startWave());
   }
 
-  private startWave(): void {
-    if (this.phase !== "build") return;
-    this.phase = "wave";
-    this.nextSpawnTime = this.time.now;
-    this.startButton.destroy();
-    this.waveText.setText(`Wave 1 — Defend!`);
-  }
-
-  private spawnTick(time: number): void {
-    if (this.spawned >= WAVE.enemyCount) return;
-    if (time < this.nextSpawnTime) return;
-    this.enemies.push(new Enemy(this, this.path, ENEMIES.grunt));
-    this.spawned++;
-    this.nextSpawnTime = time + WAVE.spawnInterval;
+  private updateStartButton(): void {
+    if (!this.startButton.scene) return;
+    if (this.phase === "build" && this.waveIndex < WAVES.length) {
+      const lbl = this.startButton.list[1] as Phaser.GameObjects.Text;
+      lbl.setText(`START WAVE ${this.waveIndex + 1}`);
+      this.startButton.setVisible(true);
+    } else {
+      this.startButton.setVisible(false);
+    }
   }
 
   private updateHud(): void {
     this.hpText.setText(`HP ${Math.max(0, this.baseHp)} / ${BASE.maxHp}`);
+    const phaseLabel =
+      this.phase === "build"
+        ? "Build"
+        : this.phase === "wave"
+          ? "Defend"
+          : this.phase === "cardPick"
+            ? "Pick a card"
+            : "—";
+    const wIdx = Math.min(this.waveIndex + 1, WAVES.length);
+    const boost =
+      this.damageMul > 1
+        ? `   Boost ×${this.damageMul.toFixed(2)}`
+        : "";
+    this.waveText.setText(
+      `Wave ${wIdx} / ${WAVES.length} — ${phaseLabel}${boost}`,
+    );
+  }
+
+  // === Phase transitions ===
+
+  private startWave(): void {
+    if (this.phase !== "build") return;
+    if (this.waveIndex >= WAVES.length) return;
+    this.phase = "wave";
+    this.selection = null;
+    const wave = WAVES[this.waveIndex];
+    if (!wave) return;
+    this.waveRunner = new WaveRunner(wave, this.time.now);
+    this.updateHud();
+    this.refreshHand();
+    this.updateStartButton();
+  }
+
+  private endWave(): void {
+    this.waveIndex++;
+    if (this.waveIndex >= WAVES.length) {
+      this.endGame(true);
+      return;
+    }
+    this.phase = "cardPick";
+    this.updateHud();
+    this.updateStartButton();
+    this.showCardPick();
   }
 
   private endGame(won: boolean): void {
     this.phase = "ended";
+    this.updateStartButton();
     this.statusText.setText(won ? "VICTORY" : "DEFEAT");
     this.statusText.setColor(won ? "#4ade80" : "#ef4444");
 
@@ -221,5 +287,301 @@ export class GameScene extends Phaser.Scene {
         this.scene.restart();
       });
     });
+  }
+
+  // === Combat ===
+
+  private fireFrom(tower: Tower, target: Enemy): void {
+    const damage = tower.damage * this.damageMul;
+    const stats = TOWERS[tower.type];
+    const onHit = (hitTarget: Enemy, hx: number, hy: number) => {
+      const now = this.time.now;
+      if (stats.aoeRadius) {
+        for (const e of this.enemies) {
+          if (e.isDead || e.reachedEnd) continue;
+          const d = Math.hypot(e.shape.x - hx, e.shape.y - hy);
+          if (d <= stats.aoeRadius) {
+            e.takeDamage(damage);
+            if (stats.slowMul && stats.slowDuration) {
+              e.applySlow(stats.slowMul, stats.slowDuration, now);
+            }
+          }
+        }
+        const splash = this.add.circle(hx, hy, stats.aoeRadius, stats.color, 0.35);
+        this.tweens.add({
+          targets: splash,
+          alpha: 0,
+          scale: 1.3,
+          duration: 280,
+          onComplete: () => splash.destroy(),
+        });
+      } else {
+        hitTarget.takeDamage(damage);
+        if (stats.slowMul && stats.slowDuration) {
+          hitTarget.applySlow(stats.slowMul, stats.slowDuration, now);
+        }
+      }
+    };
+    this.projectiles.push(
+      new Projectile(this, tower.x, tower.y, target, onHit, stats.color),
+    );
+  }
+
+  // === Card pick ===
+
+  private showCardPick(): void {
+    const cards = drawCards(3);
+
+    const overlay = this.add.rectangle(
+      SCREEN.width / 2,
+      SCREEN.height / 2,
+      SCREEN.width,
+      SCREEN.height,
+      0x000000,
+      0.75,
+    );
+    overlay.setInteractive();
+
+    const title = this.add
+      .text(SCREEN.width / 2, 230, `Wave ${this.waveIndex} cleared`, {
+        fontFamily: "sans-serif",
+        fontSize: "32px",
+        fontStyle: "bold",
+        color: "#ffffff",
+      })
+      .setOrigin(0.5);
+    const subtitle = this.add
+      .text(SCREEN.width / 2, 280, "Pick one card", {
+        fontFamily: "sans-serif",
+        fontSize: "20px",
+        color: "#9ca3af",
+      })
+      .setOrigin(0.5);
+
+    const cardW = 200;
+    const cardH = 280;
+    const gap = 18;
+    const totalW = cardW * 3 + gap * 2;
+    const startX = (SCREEN.width - totalW) / 2 + cardW / 2;
+    const cardY = SCREEN.height / 2;
+
+    const cardObjects: Phaser.GameObjects.Container[] = [];
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i];
+      if (!card) continue;
+      const cx = startX + i * (cardW + gap);
+      const bg = this.add.rectangle(0, 0, cardW, cardH, 0x1f2937);
+      bg.setStrokeStyle(4, card.color);
+      const colorBlock = this.add.rectangle(0, -80, cardW - 20, 80, card.color);
+      const labelTxt = this.add
+        .text(0, -8, card.label, {
+          fontFamily: "sans-serif",
+          fontSize: "26px",
+          fontStyle: "bold",
+          color: "#ffffff",
+        })
+        .setOrigin(0.5);
+      const descTxt = this.add
+        .text(0, 50, card.description, {
+          fontFamily: "sans-serif",
+          fontSize: "16px",
+          color: "#d1d5db",
+          align: "center",
+          wordWrap: { width: cardW - 24 },
+        })
+        .setOrigin(0.5);
+
+      const container = this.add.container(cx, cardY, [
+        bg,
+        colorBlock,
+        labelTxt,
+        descTxt,
+      ]);
+      container.setSize(cardW, cardH);
+      container.setInteractive({ useHandCursor: true });
+      container.on("pointerdown", () => this.pickCard(card));
+      cardObjects.push(container);
+    }
+
+    this.cardModal = this.add.container(0, 0, [
+      overlay,
+      title,
+      subtitle,
+      ...cardObjects,
+    ]);
+  }
+
+  private pickCard(card: CardDef): void {
+    if (this.phase !== "cardPick") return;
+
+    switch (card.effect.kind) {
+      case "addTower":
+        this.towerTokens.push(card.effect.towerType);
+        break;
+      case "upgrade":
+        this.upgradeTokens++;
+        break;
+      case "damageBoost":
+        this.damageMul *= card.effect.mul;
+        break;
+      case "repair":
+        this.baseHp = Math.min(BASE.maxHp, this.baseHp + card.effect.amount);
+        break;
+    }
+
+    this.cardModal?.destroy();
+    this.cardModal = null;
+    this.phase = "build";
+    this.refreshHand();
+    this.updateHud();
+    this.updateStartButton();
+  }
+
+  // === Hand UI ===
+
+  private refreshHand(): void {
+    this.handContainer.removeAll(true);
+
+    const yPos = SCREEN.height - 130;
+    let xPos = 50;
+    const tokenSize = 26;
+    const tokenGap = 18;
+
+    for (let i = 0; i < this.towerTokens.length; i++) {
+      const type = this.towerTokens[i];
+      if (!type) continue;
+      const stats = TOWERS[type];
+      const isSelected =
+        this.selection?.kind === "tower" &&
+        this.selection.towerType === type &&
+        this.towerTokens.indexOf(type) === i;
+
+      const token = this.add.circle(xPos, yPos, tokenSize, stats.color);
+      token.setStrokeStyle(
+        isSelected ? 4 : 2,
+        0xffffff,
+        isSelected ? 1 : 0.5,
+      );
+      token.setInteractive({ useHandCursor: true });
+      token.on("pointerdown", () => this.selectTowerToken(type));
+
+      const lbl = this.add
+        .text(xPos, yPos, stats.label, {
+          fontFamily: "sans-serif",
+          fontSize: "18px",
+          fontStyle: "bold",
+          color: "#ffffff",
+        })
+        .setOrigin(0.5);
+
+      this.handContainer.add(token);
+      this.handContainer.add(lbl);
+      xPos += tokenSize * 2 + tokenGap;
+    }
+
+    if (this.upgradeTokens > 0) {
+      const isSelected = this.selection?.kind === "upgrade";
+      const token = this.add.circle(xPos, yPos, tokenSize, 0xa855f7);
+      token.setStrokeStyle(
+        isSelected ? 4 : 2,
+        0xffffff,
+        isSelected ? 1 : 0.5,
+      );
+      token.setInteractive({ useHandCursor: true });
+      token.on("pointerdown", () => this.selectUpgradeToken());
+      const lbl = this.add
+        .text(xPos, yPos, `U×${this.upgradeTokens}`, {
+          fontFamily: "sans-serif",
+          fontSize: "13px",
+          fontStyle: "bold",
+          color: "#ffffff",
+        })
+        .setOrigin(0.5);
+      this.handContainer.add(token);
+      this.handContainer.add(lbl);
+      xPos += tokenSize * 2 + tokenGap;
+    }
+
+    if (this.towerTokens.length === 0 && this.upgradeTokens === 0) {
+      const empty = this.add
+        .text(50, yPos, "no cards in hand", {
+          fontFamily: "sans-serif",
+          fontSize: "14px",
+          color: "#6b7280",
+        })
+        .setOrigin(0, 0.5);
+      this.handContainer.add(empty);
+    }
+
+    if (this.selection) {
+      const hintText =
+        this.selection.kind === "tower"
+          ? "tap a slot to place"
+          : "tap a tower to upgrade";
+      const hint = this.add
+        .text(SCREEN.width - 30, yPos, hintText, {
+          fontFamily: "sans-serif",
+          fontSize: "13px",
+          color: "#fde047",
+        })
+        .setOrigin(1, 0.5);
+      this.handContainer.add(hint);
+    }
+  }
+
+  private selectTowerToken(type: TowerType): void {
+    if (
+      this.selection?.kind === "tower" &&
+      this.selection.towerType === type
+    ) {
+      this.selection = null;
+    } else {
+      this.selection = { kind: "tower", towerType: type };
+    }
+    this.refreshHand();
+  }
+
+  private selectUpgradeToken(): void {
+    if (this.selection?.kind === "upgrade") {
+      this.selection = null;
+    } else {
+      this.selection = { kind: "upgrade" };
+    }
+    this.refreshHand();
+  }
+
+  // === Slot / tower interactions ===
+
+  private onSlotTap(slot: SlotPos): void {
+    if (this.phase === "ended" || this.phase === "cardPick") return;
+    if (!this.selection || this.selection.kind !== "tower") return;
+
+    const type = this.selection.towerType;
+    const idx = this.towerTokens.indexOf(type);
+    if (idx === -1) return;
+
+    const marker = this.slotMarkers.get(slot);
+    if (!marker) return;
+
+    const tower = new Tower(this, slot.x, slot.y, type);
+    this.towers.push(tower);
+
+    this.towerTokens.splice(idx, 1);
+    this.selection = null;
+
+    marker.destroy();
+    this.slotMarkers.delete(slot);
+    this.refreshHand();
+  }
+
+  private onTowerTap(tower: Tower): void {
+    if (this.phase === "ended" || this.phase === "cardPick") return;
+    if (!this.selection || this.selection.kind !== "upgrade") return;
+    if (this.upgradeTokens <= 0) return;
+
+    tower.upgrade();
+    this.upgradeTokens--;
+    this.selection = null;
+    this.refreshHand();
   }
 }
