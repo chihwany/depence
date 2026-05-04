@@ -994,12 +994,15 @@ export class GameScene extends Phaser.Scene {
     // Last cell of shape is the new spawn
     this.grid.setCellType(newSpawnCell.col, newSpawnCell.row, "spawn");
 
-    // Prepend shape cells in REVERSE order (so newSpawn ends up at index 0)
-    for (let i = cells.length - 1; i >= 0; i--) {
-      const c = cells[i];
-      if (!c) continue;
-      this.pathCells.unshift({ col: c.col, row: c.row });
-    }
+    // pathCells is in enemy-traversal order (spawn -> ... -> base).
+    // The new spawn is the LAST cell of the shape (cells[end]), so the
+    // shape cells must be prepended in REVERSE so cells[end] sits at
+    // index 0, cells[end-1] next, ... and cells[0] just before the old
+    // spawn cell.
+    const newFront = cells
+      .map((c) => ({ col: c.col, row: c.row }))
+      .reverse();
+    this.pathCells = [...newFront, ...this.pathCells];
 
     this.shapeTokens[shapeId]--;
     if (this.shapeTokens[shapeId] === 0) this.selection = null;
