@@ -22,13 +22,9 @@ export interface GridConfig {
 export class Grid {
   readonly config: GridConfig;
   readonly cells: Cell[][];
-  readonly spawn: GridPosition;
-  readonly base: GridPosition;
 
-  constructor(config: GridConfig, spawn: GridPosition, base: GridPosition) {
+  constructor(config: GridConfig) {
     this.config = config;
-    this.spawn = spawn;
-    this.base = base;
     this.cells = [];
     for (let row = 0; row < config.rows; row++) {
       const rowArr: Cell[] = [];
@@ -37,10 +33,6 @@ export class Grid {
       }
       this.cells.push(rowArr);
     }
-    const spawnCell = this.getCell(spawn.col, spawn.row);
-    if (spawnCell) spawnCell.type = "spawn";
-    const baseCell = this.getCell(base.col, base.row);
-    if (baseCell) baseCell.type = "base";
   }
 
   getCell(col: number, row: number): Cell | null {
@@ -54,7 +46,6 @@ export class Grid {
   setCellType(col: number, row: number, type: CellType): boolean {
     const cell = this.getCell(col, row);
     if (!cell) return false;
-    if (cell.type === "spawn" || cell.type === "base") return false;
     cell.type = type;
     return true;
   }

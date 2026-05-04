@@ -9,11 +9,10 @@ import {
 } from "../data/balance";
 import {
   GRID_CONFIG,
-  SPAWN_CELL,
-  BASE_CELL,
-  INITIAL_ROADS,
-  buildCurvePath,
-  isPathValid,
+  INITIAL_PATH_CELLS,
+  buildCurvePathFromCells,
+  isAdjacent,
+  getNeighbors,
 } from "../systems/Path";
 import { Grid, type GridPosition } from "../systems/Grid";
 import { WaveRunner } from "../systems/WaveRunner";
@@ -34,6 +33,8 @@ export class GameScene extends Phaser.Scene {
   private grid!: Grid;
   private gridGraphics!: Phaser.GameObjects.Graphics;
   private path: Phaser.Curves.Path | null = null;
+  private pathCells: GridPosition[] = [];
+  private spawnText!: Phaser.GameObjects.Text;
   private enemies: Enemy[] = [];
   private towers: Tower[] = [];
   private projectiles: Projectile[] = [];
@@ -70,11 +71,11 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     this.resetState();
     this.matchStartTime = this.time.now;
-    this.grid = new Grid(GRID_CONFIG, SPAWN_CELL, BASE_CELL);
-    this.applyInitialRoads();
+    this.grid = new Grid(GRID_CONFIG);
+    this.applyPathCellsToGrid();
     this.gridGraphics = this.add.graphics();
-    this.redrawGrid();
     this.drawSpawnAndBase();
+    this.redrawGrid();
     this.setupGridInput();
     this.drawHud();
     this.drawSpeedButton();
@@ -161,6 +162,7 @@ export class GameScene extends Phaser.Scene {
     this.projectiles = [];
     this.cellTowers.clear();
     this.path = null;
+    this.pathCells = INITIAL_PATH_CELLS.map((c) => ({ col: c.col, row: c.row }));
     this.phase = "build";
     this.waveIndex = 0;
     this.baseHp = BASE.maxHp;
@@ -177,10 +179,30 @@ export class GameScene extends Phaser.Scene {
     this.tweens.timeScale = 1;
   }
 
-  private applyInitialRoads(): void {
-    for (const r of INITIAL_ROADS) {
-      this.grid.setCellType(r.col, r.row, "road");
+  private applyPathCellsToGrid(): void {
+    // Clear all cells first (in case of restart)
+    for (let row = 0; row < this.grid.config.rows; row++) {
+      for (let col = 0; col < this.grid.config.cols; col++) {
+        this.grid.setCellType(col, row, "empty");
+      }
     }
+    // Mark path cells: first = spawn, last = base, middle = road
+    const last = this.pathCells.length - 1;
+    for (let i = 0; i < this.pathCells.length; i++) {
+      const c = this.pathCells[i];
+      if (!c) continue;
+      const type =
+        i === 0 ? "spawn" : i === last ? "base" : "road";
+      this.grid.setCellType(c.col, c.row, type);
+    }
+  }
+
+  private currentSpawn(): GridPosition {
+    return this.pathCells[0] ?? { col: 0, row: 0 };
+  }
+
+  private currentBase(): GridPosition {
+    return this.pathCells[this.pathCells.length - 1] ?? { col: 0, row: 0 };
   }
 
   private redrawGrid(): void {
@@ -205,11 +227,11 @@ export class GameScene extends Phaser.Scene {
             this.gridGraphics.fillRect(x, y, inner, inner);
             break;
           case "spawn":
-            this.gridGraphics.fillStyle(0xef4444, 0.45);
+            this.gridGraphics.fillStyle(0xef4444, 0.55);
             this.gridGraphics.fillRect(x, y, inner, inner);
             break;
           case "base":
-            this.gridGraphics.fillStyle(0x16a34a, 0.45);
+            this.gridGraphics.fillStyle(0x16a34a, 0.55);
             this.gridGraphics.fillRect(x, y, inner, inner);
             break;
           case "tower":
@@ -222,11 +244,25 @@ export class GameScene extends Phaser.Scene {
         this.gridGraphics.strokeRect(x, y, inner, inner);
       }
     }
+
+    // Highlight cells where the player can extend the spawn (build phase only)
+    if (this.phase === "build" && this.pathCells.length > 0) {
+      const spawn = this.currentSpawn();
+      for (const adj of getNeighbors(spawn)) {
+        const cell = this.grid.getCell(adj.col, adj.row);
+        if (!cell || cell.type !== "empty") continue;
+        const w = this.grid.cellToWorld(adj.col, adj.row);
+        const x = w.x - size / 2 + 1;
+        const y = w.y - size / 2 + 1;
+        this.gridGraphics.lineStyle(3, 0xfde047, 0.85);
+        this.gridGraphics.strokeRect(x, y, inner, inner);
+      }
+    }
   }
 
   private drawSpawnAndBase(): void {
-    const s = this.grid.cellToWorld(this.grid.spawn.col, this.grid.spawn.row);
-    this.add
+    const s = this.grid.cellToWorld(this.currentSpawn().col, this.currentSpawn().row);
+    this.spawnText = this.add
       .text(s.x, s.y, "SPAWN", {
         fontFamily: "sans-serif",
         fontSize: "12px",
@@ -234,7 +270,7 @@ export class GameScene extends Phaser.Scene {
         color: "#ffffff",
       })
       .setOrigin(0.5);
-    const b = this.grid.cellToWorld(this.grid.base.col, this.grid.base.row);
+    const b = this.grid.cellToWorld(this.currentBase().col, this.currentBase().row);
     this.add
       .text(b.x, b.y, "BASE", {
         fontFamily: "sans-serif",
@@ -243,6 +279,11 @@ export class GameScene extends Phaser.Scene {
         color: "#ffffff",
       })
       .setOrigin(0.5);
+  }
+
+  private refreshSpawnTextPosition(): void {
+    const s = this.grid.cellToWorld(this.currentSpawn().col, this.currentSpawn().row);
+    this.spawnText.setPosition(s.x, s.y);
   }
 
   private setupGridInput(): void {
@@ -302,16 +343,10 @@ export class GameScene extends Phaser.Scene {
   private updateStartButton(): void {
     if (!this.startButton.scene) return;
     if (this.phase === "build" && this.waveIndex < WAVES.length) {
-      const valid = isPathValid(this.grid);
       const lbl = this.startButton.list[1] as Phaser.GameObjects.Text;
       const bg = this.startButton.list[0] as Phaser.GameObjects.Rectangle;
-      if (valid) {
-        lbl.setText(`START WAVE ${this.waveIndex + 1}`);
-        bg.setFillStyle(0x4ade80);
-      } else {
-        lbl.setText("PATH INCOMPLETE");
-        bg.setFillStyle(0x6b7280);
-      }
+      lbl.setText(`START WAVE ${this.waveIndex + 1}`);
+      bg.setFillStyle(0x4ade80);
       this.startButton.setVisible(true);
     } else {
       this.startButton.setVisible(false);
@@ -343,9 +378,10 @@ export class GameScene extends Phaser.Scene {
   private startWave(): void {
     if (this.phase !== "build") return;
     if (this.waveIndex >= WAVES.length) return;
-    const newPath = buildCurvePath(this.grid);
+    const newPath = buildCurvePathFromCells(this.grid, this.pathCells);
     if (!newPath) return;
     this.path = newPath;
+    this.redrawGrid();
     this.phase = "wave";
     this.selection = null;
     const wave = WAVES[this.waveIndex];
@@ -834,6 +870,7 @@ export class GameScene extends Phaser.Scene {
     const cell = this.grid.getCell(pos.col, pos.row);
     if (!cell) return;
 
+    // Tower placement: tower token selected + empty cell
     if (this.selection?.kind === "tower") {
       if (cell.type !== "empty") return;
       const type = this.selection.towerType;
@@ -850,19 +887,39 @@ export class GameScene extends Phaser.Scene {
       this.selection = null;
       this.refreshHand();
       this.redrawGrid();
-      this.updateStartButton();
       return;
     }
 
-    if (cell.type === "empty") {
-      this.grid.setCellType(pos.col, pos.row, "road");
-      this.redrawGrid();
-      this.updateStartButton();
-    } else if (cell.type === "road") {
-      this.grid.setCellType(pos.col, pos.row, "empty");
-      this.redrawGrid();
-      this.updateStartButton();
+    // Extend spawn: empty cell adjacent to current spawn
+    if (cell.type === "empty" && isAdjacent(pos, this.currentSpawn())) {
+      this.extendSpawn(pos);
+      return;
     }
+
+    // Contract spawn: tap on current spawn cell (only if path > 2)
+    if (cell.type === "spawn" && this.pathCells.length > 2) {
+      this.contractSpawn();
+    }
+  }
+
+  private extendSpawn(newCell: GridPosition): void {
+    const oldSpawn = this.currentSpawn();
+    this.pathCells.unshift({ col: newCell.col, row: newCell.row });
+    this.grid.setCellType(oldSpawn.col, oldSpawn.row, "road");
+    this.grid.setCellType(newCell.col, newCell.row, "spawn");
+    this.refreshSpawnTextPosition();
+    this.redrawGrid();
+  }
+
+  private contractSpawn(): void {
+    if (this.pathCells.length <= 2) return;
+    const oldSpawn = this.pathCells.shift();
+    if (!oldSpawn) return;
+    this.grid.setCellType(oldSpawn.col, oldSpawn.row, "empty");
+    const newSpawn = this.currentSpawn();
+    this.grid.setCellType(newSpawn.col, newSpawn.row, "spawn");
+    this.refreshSpawnTextPosition();
+    this.redrawGrid();
   }
 
   private onTowerTap(tower: Tower): void {

@@ -1,6 +1,5 @@
 import Phaser from "phaser";
 import type { Grid, GridConfig, GridPosition } from "./Grid";
-import { findPath } from "./PathFinder";
 
 export const GRID_CONFIG: GridConfig = {
   cols: 8,
@@ -10,26 +9,24 @@ export const GRID_CONFIG: GridConfig = {
   offsetY: 180,
 };
 
-export const SPAWN_CELL: GridPosition = { col: 3, row: 0 };
-export const BASE_CELL: GridPosition = { col: 3, row: 9 };
-
-// Pre-placed straight road from spawn to base so the player can play
-// immediately. They can remove and reroute for strategic depth.
-export const INITIAL_ROADS: GridPosition[] = [
-  { col: 3, row: 1 },
-  { col: 3, row: 2 },
-  { col: 3, row: 3 },
+// Initial path: short straight segment near the bottom of the grid.
+// First element is spawn, last is base. Player extends behind spawn
+// (prepends to this list) to lengthen the route over time.
+export const INITIAL_PATH_CELLS: GridPosition[] = [
+  { col: 3, row: 3 }, // spawn
   { col: 3, row: 4 },
   { col: 3, row: 5 },
   { col: 3, row: 6 },
   { col: 3, row: 7 },
   { col: 3, row: 8 },
+  { col: 3, row: 9 }, // base
 ];
 
-export function buildCurvePath(grid: Grid): Phaser.Curves.Path | null {
-  const cells = findPath(grid, grid.spawn, grid.base);
-  if (!cells || cells.length < 2) return null;
-
+export function buildCurvePathFromCells(
+  grid: Grid,
+  cells: GridPosition[],
+): Phaser.Curves.Path | null {
+  if (cells.length < 2) return null;
   const first = cells[0];
   if (!first) return null;
   const startWorld = grid.cellToWorld(first.col, first.row);
@@ -43,7 +40,17 @@ export function buildCurvePath(grid: Grid): Phaser.Curves.Path | null {
   return path;
 }
 
-export function isPathValid(grid: Grid): boolean {
-  const cells = findPath(grid, grid.spawn, grid.base);
-  return cells !== null && cells.length >= 2;
+export function isAdjacent(a: GridPosition, b: GridPosition): boolean {
+  const dc = Math.abs(a.col - b.col);
+  const dr = Math.abs(a.row - b.row);
+  return (dc === 1 && dr === 0) || (dc === 0 && dr === 1);
+}
+
+export function getNeighbors(p: GridPosition): GridPosition[] {
+  return [
+    { col: p.col - 1, row: p.row },
+    { col: p.col + 1, row: p.row },
+    { col: p.col, row: p.row - 1 },
+    { col: p.col, row: p.row + 1 },
+  ];
 }
