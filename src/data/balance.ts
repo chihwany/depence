@@ -118,7 +118,12 @@ export const SHAPES: Record<ShapeId, ShapeDef> = {
     id: "I",
     label: "I",
     color: 0x78716c,
-    offsets: [{ dCol: 0, dRow: -1 }],
+    // 2-cell straight: extends 2 cells in one placement so each Straight
+    // card grants exactly one action that lays 2 cells of road.
+    offsets: [
+      { dCol: 0, dRow: -1 },
+      { dCol: 0, dRow: -2 },
+    ],
   },
   L: {
     id: "L",
@@ -160,7 +165,7 @@ export const CARD_POOL: CardDef[] = [
   { id: "sniper",   label: "Sniper",   description: "1× Sniper tower",        color: 0x3b82f6, effect: { kind: "addTower", towerType: "sniper" } },
   { id: "cannon",   label: "Cannon",   description: "1× Cannon (AOE)",        color: 0xf97316, effect: { kind: "addTower", towerType: "cannon" } },
   { id: "frost",    label: "Frost",    description: "1× Frost (slow)",        color: 0x06b6d4, effect: { kind: "addTower", towerType: "frost" } },
-  { id: "shape-i",  label: "Straight", description: "+2 Straight pieces (1 cell)",  color: 0x78716c, effect: { kind: "addShape", shapeId: "I", amount: 2 } },
+  { id: "shape-i",  label: "Straight", description: "+1 Straight piece (2 cells)", color: 0x78716c, effect: { kind: "addShape", shapeId: "I", amount: 1 } },
   { id: "shape-l",  label: "L Turn",   description: "+1 L-Turn piece (2 cells)",    color: 0xa78bfa, effect: { kind: "addShape", shapeId: "L", amount: 1 } },
   { id: "shape-u",  label: "U Turn",   description: "+1 U-Turn piece (3 cells)",    color: 0xfb923c, effect: { kind: "addShape", shapeId: "U", amount: 1 } },
   { id: "upgrade",  label: "Upgrade",  description: "+1 level on a tower",    color: 0xa855f7, effect: { kind: "upgrade" } },
