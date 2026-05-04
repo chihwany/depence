@@ -12,13 +12,12 @@ import {
 import {
   GRID_CONFIG,
   INITIAL_PATH_CELLS,
-  STARTING_SHAPE_TOKENS,
   buildCurvePathFromCells,
 } from "../systems/Path";
 import { Grid, type GridPosition } from "../systems/Grid";
 import { getBackPlacement, type Placement } from "../systems/Shape";
 import { WaveRunner } from "../systems/WaveRunner";
-import { drawCards } from "../systems/CardPool";
+import { drawCards, drawStarterCards } from "../systems/CardPool";
 import { Enemy } from "../entities/Enemy";
 import { Tower } from "../entities/Tower";
 import { Projectile } from "../entities/Projectile";
@@ -67,6 +66,7 @@ export class GameScene extends Phaser.Scene {
   private gameTime = 0;
   private speedMul = 1;
   private speedButton!: Phaser.GameObjects.Container;
+  private baseLastFireTime = 0;
 
   constructor() {
     super("GameScene");
@@ -96,6 +96,12 @@ export class GameScene extends Phaser.Scene {
         if (tower) this.onTowerTap(tower);
       },
     );
+
+    // Open the starting card pick before wave 1
+    this.phase = "cardPick";
+    this.updateHud();
+    this.updateStartButton();
+    this.showCardPick();
   }
 
   override update(_time: number, delta: number): void {
@@ -125,6 +131,11 @@ export class GameScene extends Phaser.Scene {
 
     for (const tower of this.towers) {
       tower.update(t, this.enemies, (target) => this.fireFrom(tower, target));
+    }
+
+    // Base built-in defense: only during wave (no need to fire when no enemies)
+    if (this.phase === "wave") {
+      this.updateBaseDefense(t);
     }
 
     for (const p of this.projectiles) {
@@ -172,10 +183,11 @@ export class GameScene extends Phaser.Scene {
     this.baseHp = BASE.maxHp;
     this.damageMul = 1;
     this.waveRunner = null;
-    this.towerTokens = ["sniper"];
+    this.towerTokens = [];
     this.upgradeTokens = 0;
-    this.shapeTokens = { ...STARTING_SHAPE_TOKENS };
+    this.shapeTokens = { I: 0, L: 0, U: 0 };
     this.selection = null;
+    this.baseLastFireTime = 0;
     this.cardModal = null;
     this.pauseModal = null;
     this.isPaused = false;
@@ -288,6 +300,11 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
     const b = this.grid.cellToWorld(this.currentBase().col, this.currentBase().row);
+
+    // Visualize the base's auto-defense range
+    const baseRange = this.add.circle(b.x, b.y, BASE.range, BASE.color, 0.05);
+    baseRange.setStrokeStyle(1, BASE.color, 0.3);
+
     this.add
       .text(b.x, b.y, "BASE", {
         fontFamily: "sans-serif",
@@ -555,6 +572,38 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
+  // === Base auto-defense ===
+
+  private updateBaseDefense(time: number): void {
+    if (time - this.baseLastFireTime < BASE.fireRate) return;
+    const base = this.currentBase();
+    const baseWorld = this.grid.cellToWorld(base.col, base.row);
+
+    // Furthest-along-path enemy in range
+    let target: Enemy | null = null;
+    let bestProgress = -1;
+    for (const e of this.enemies) {
+      if (e.isDead || e.reachedEnd) continue;
+      const dx = e.shape.x - baseWorld.x;
+      const dy = e.shape.y - baseWorld.y;
+      if (Math.sqrt(dx * dx + dy * dy) > BASE.range) continue;
+      if (e.pathProgress > bestProgress) {
+        target = e;
+        bestProgress = e.pathProgress;
+      }
+    }
+    if (!target) return;
+
+    const onHit = (hitTarget: Enemy, hx: number, hy: number) => {
+      hitTarget.takeDamage(BASE.damage);
+      this.spawnDamagePopup(hx, hy, BASE.damage);
+    };
+    this.projectiles.push(
+      new Projectile(this, baseWorld.x, baseWorld.y, target, onHit, BASE.color),
+    );
+    this.baseLastFireTime = time;
+  }
+
   // === Polish effects ===
 
   private spawnDamagePopup(x: number, y: number, amount: number): void {
@@ -656,7 +705,8 @@ export class GameScene extends Phaser.Scene {
   // === Card pick ===
 
   private showCardPick(): void {
-    const cards = drawCards(3);
+    const isStarter = this.waveIndex === 0;
+    const cards = isStarter ? drawStarterCards(3) : drawCards(3);
 
     const overlay = this.add.rectangle(
       SCREEN.width / 2,
@@ -668,10 +718,13 @@ export class GameScene extends Phaser.Scene {
     );
     overlay.setInteractive();
 
+    const titleText = isStarter
+      ? "Choose your starting card"
+      : `Wave ${this.waveIndex} cleared`;
     const title = this.add
-      .text(SCREEN.width / 2, 230, `Wave ${this.waveIndex} cleared`, {
+      .text(SCREEN.width / 2, 230, titleText, {
         fontFamily: "sans-serif",
-        fontSize: "32px",
+        fontSize: "30px",
         fontStyle: "bold",
         color: "#ffffff",
       })

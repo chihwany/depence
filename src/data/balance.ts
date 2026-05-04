@@ -5,6 +5,12 @@ export const SCREEN = {
 
 export const BASE = {
   maxHp: 15,
+  // Base auto-defense: a built-in turret on the base that fires at
+  // anything within `range` pixels. range = 2 cells (cellSize is 70).
+  damage: 5,
+  range: 140,
+  fireRate: 700,
+  color: 0x4ade80,
 } as const;
 
 export type EnemyType = "grunt" | "runner" | "tank" | "boss";
