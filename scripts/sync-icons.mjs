@@ -17,12 +17,12 @@ const DEST_DIR = join(ROOT, "public", "assets", "icons");
 
 // Source filename in src/image/ -> destination filename in public/assets/icons/
 const MAPPING = {
-  "quant sniper.png":   "sniper.png",
-  "phase cannon.png":   "cannon.png",
-  "cryo hub.png":       "frost.png",
-  "mecha hive.png":     "mechanest.png",
-  "pulse emitter.png":  "laser.png",
-  "voltaic cannon.png": "inferno.png",
+  "sniper.png":   "sniper.png",
+  "cannon.png":   "cannon.png",
+  "frost.png":       "frost.png",
+  "mechanest.png":     "mechanest.png",
+  "laser.png":  "laser.png",
+  "inferno.png": "inferno.png",
   "tesla.png":          "tesla.png",
   "frostgun.png":       "frostgun.png",
   "fireworks.png":      "fireworks.png",

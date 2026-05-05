@@ -64,6 +64,26 @@
 
 ---
 
+## 에셋 워크플로우 (sync-icons 스크립트)
+
+타워 아이콘 PNG 교체는 **`npm run sync-icons`** 한 줄로 끝남.
+
+1. 새 PNG를 `src/image/`에 **게임의 타워 키 그대로** 저장:
+   - `sniper.png`, `cannon.png`, `frost.png`, `tesla.png`, `laser.png`,
+     `frostgun.png`, `fireworks.png`, `inferno.png`, `tornado.png`, `mechanest.png`
+2. `npm run sync-icons` 실행 → `public/assets/icons/`로 자동 복사
+   (md5 일치하면 스킵, 누락된 파일은 보고)
+3. `src/scenes/TitleScene.ts`의 `ICON_FILES`에서 해당 타워가 `.png`로 설정됐는지 확인
+4. 브라우저 하드 리프레시 (`Ctrl+Shift+R`)
+
+매핑 테이블은 `scripts/sync-icons.mjs` 상단의 `MAPPING` 객체. 현재 컨벤션은
+**1:1** (`sniper.png` → `sniper.png`) — 소스/대상 동일 이름.
+
+PNG 권장 사양: 256×256 정사각, 투명 배경, 라벨/텍스트 없음. 출시 전 TinyPNG
+등으로 압축 (현재 1~2MB → 200KB 이하 목표).
+
+---
+
 ## 즉시 처리할 작업 (MVP 완료 위해)
 
 ### 6주차 — Capacitor 모바일 빌드 ⏳
