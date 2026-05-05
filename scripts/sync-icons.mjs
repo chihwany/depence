@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Copies tower-icon PNGs from src/image/ (where the user drops new
-// AI-generated art with their own filenames) to public/assets/icons/
-// (where Phaser's preload reads them from with the game's tower keys).
+// Resizes + compresses tower-icon PNGs from src/image/ (masters, lossless)
+// into public/assets/icons/ (256x256 palette PNGs, ~100-200 KB each) where
+// Phaser's preload reads them with the game's tower keys.
 //
 // Run with: npm run sync-icons
 
-import { readFileSync, copyFileSync, existsSync, statSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { existsSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import sharp from "sharp";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -17,21 +17,19 @@ const DEST_DIR = join(ROOT, "public", "assets", "icons");
 
 // Source filename in src/image/ -> destination filename in public/assets/icons/
 const MAPPING = {
-  "sniper.png":   "sniper.png",
-  "cannon.png":   "cannon.png",
-  "frost.png":       "frost.png",
-  "mechanest.png":     "mechanest.png",
-  "laser.png":  "laser.png",
-  "inferno.png": "inferno.png",
-  "tesla.png":          "tesla.png",
-  "frostgun.png":       "frostgun.png",
-  "fireworks.png":      "fireworks.png",
-  "tornado.png":        "tornado.png",
+  "sniper.png":    "sniper.png",
+  "cannon.png":    "cannon.png",
+  "frost.png":     "frost.png",
+  "mechanest.png": "mechanest.png",
+  "laser.png":     "laser.png",
+  "inferno.png":   "inferno.png",
+  "tesla.png":     "tesla.png",
+  "frostgun.png":  "frostgun.png",
+  "fireworks.png": "fireworks.png",
+  "tornado.png":   "tornado.png",
 };
 
-function md5(path) {
-  return createHash("md5").update(readFileSync(path)).digest("hex");
-}
+const TARGET_SIZE = 256;
 
 function fmtSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -39,10 +37,11 @@ function fmtSize(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-let copied = 0;
-let skippedSame = 0;
+let processed = 0;
 let missing = 0;
-const PAD = 22;
+let totalIn = 0;
+let totalOut = 0;
+const PAD = 18;
 
 for (const [srcName, destName] of Object.entries(MAPPING)) {
   const srcPath = join(SRC_DIR, srcName);
@@ -54,17 +53,34 @@ for (const [srcName, destName] of Object.entries(MAPPING)) {
     continue;
   }
 
-  if (existsSync(destPath) && md5(srcPath) === md5(destPath)) {
-    console.log(`=  ${srcName.padEnd(PAD)} -> ${destName}  (already up to date)`);
-    skippedSame++;
-    continue;
-  }
+  const inBytes = statSync(srcPath).size;
+  await sharp(srcPath)
+    .resize(TARGET_SIZE, TARGET_SIZE, {
+      fit: "contain",
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .png({
+      compressionLevel: 9,
+      palette: true,
+      quality: 90,
+      effort: 10,
+    })
+    .toFile(destPath);
+  const outBytes = statSync(destPath).size;
 
-  copyFileSync(srcPath, destPath);
-  const size = fmtSize(statSync(destPath).size);
-  console.log(`+  ${srcName.padEnd(PAD)} -> ${destName.padEnd(16)}  ${size}`);
-  copied++;
+  totalIn += inBytes;
+  totalOut += outBytes;
+  processed++;
+
+  const pct = ((1 - outBytes / inBytes) * 100).toFixed(0);
+  console.log(
+    `+  ${srcName.padEnd(PAD)} -> ${destName.padEnd(16)}  ${fmtSize(inBytes).padStart(9)} -> ${fmtSize(outBytes).padStart(9)}  (-${pct}%)`,
+  );
 }
 
 console.log("");
-console.log(`Done: ${copied} copied, ${skippedSame} unchanged, ${missing} missing.`);
+console.log(
+  `Done: ${processed} processed, ${missing} missing.  ` +
+    `Total ${fmtSize(totalIn)} -> ${fmtSize(totalOut)}` +
+    (totalIn > 0 ? `  (-${((1 - totalOut / totalIn) * 100).toFixed(0)}%)` : ""),
+);
