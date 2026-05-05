@@ -74,7 +74,7 @@ export class GameScene extends Phaser.Scene {
 
   private towerTokens: TowerType[] = [];
   private upgradeTokens = 0;
-  private shapeTokens: Record<ShapeId, number> = { I: 0, L: 0, U: 0 };
+  private shapeTokens: Record<ShapeId, number> = { I1: 0, I2: 0, I3: 0, L3: 0, L4: 0, L5: 0, U4: 0, U5: 0, U7: 0 };
   private selection: Selection = null;
 
   private hpText!: Phaser.GameObjects.Text;
@@ -227,7 +227,7 @@ export class GameScene extends Phaser.Scene {
     this.waveRunner = null;
     this.towerTokens = [];
     this.upgradeTokens = 0;
-    this.shapeTokens = { I: 0, L: 0, U: 0 };
+    this.shapeTokens = { I1: 0, I2: 0, I3: 0, L3: 0, L4: 0, L5: 0, U4: 0, U5: 0, U7: 0 };
     this.selection = null;
     this.baseLastFireTime = 0;
     this.cardModal = null;
@@ -1009,7 +1009,7 @@ export class GameScene extends Phaser.Scene {
       xPos += tokenSize * 2 + tokenGap;
     }
 
-    const shapeOrder: ShapeId[] = ["I", "L", "U"];
+    const shapeOrder: ShapeId[] = ["I1", "I2", "I3", "L3", "L4", "L5", "U4", "U5", "U7"];
     for (const shapeId of shapeOrder) {
       const count = this.shapeTokens[shapeId];
       if (count <= 0) continue;
@@ -1068,7 +1068,15 @@ export class GameScene extends Phaser.Scene {
     }
 
     const totalShapeTokens =
-      this.shapeTokens.I + this.shapeTokens.L + this.shapeTokens.U;
+      this.shapeTokens.I1 +
+      this.shapeTokens.I2 +
+      this.shapeTokens.I3 +
+      this.shapeTokens.L3 +
+      this.shapeTokens.L4 +
+      this.shapeTokens.L5 +
+      this.shapeTokens.U4 +
+      this.shapeTokens.U5 +
+      this.shapeTokens.U7;
     if (
       this.towerTokens.length === 0 &&
       this.upgradeTokens === 0 &&

@@ -20,9 +20,15 @@ export type IconKind =
   | "repair";
 
 const SHAPE_TO_ICON: Record<ShapeId, IconKind> = {
-  I: "straight",
-  L: "lturn",
-  U: "uturn",
+  I1: "straight",
+  I2: "straight",
+  I3: "straight",
+  L3: "lturn",
+  L4: "lturn",
+  L5: "lturn",
+  U4: "uturn",
+  U5: "uturn",
+  U7: "uturn",
 };
 
 export function towerIconKind(type: TowerType): IconKind {

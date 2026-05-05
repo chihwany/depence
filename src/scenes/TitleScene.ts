@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { SCREEN } from "../data/balance";
+import { SCREEN, WAVES } from "../data/balance";
 import { loadSave } from "../data/storage";
 import { createButton } from "../ui/Button";
 
@@ -62,7 +62,7 @@ export class TitleScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
     this.add
-      .text(width / 2, statsY + 30, `Best wave: ${save.bestWave} / 6`, {
+      .text(width / 2, statsY + 30, `Best wave: ${save.bestWave} / ${WAVES.length}`, {
         fontFamily: "sans-serif",
         fontSize: "20px",
         color: "#e5e7eb",
