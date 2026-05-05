@@ -67,7 +67,11 @@ export function drawIcon(
   const textureKey = `icon-${kind}`;
   if (scene.textures.exists(textureKey)) {
     const img = scene.add.image(x, y, textureKey);
-    img.setDisplaySize(size, size);
+    // Use setScale based on the frame's own width — more reliable across
+    // texture types (256×256 PNGs vs 64×64 SVGs) and survives re-parenting
+    // into a scaled container, which setDisplaySize did not.
+    const frameW = img.frame?.width || 256;
+    img.setScale(size / frameW);
     return img;
   }
 

@@ -18,10 +18,12 @@ export class Projectile {
     target: Enemy,
     onHit: ProjectileHitCallback,
     color: number = PROJECTILE.color,
+    parent?: Phaser.GameObjects.Container,
   ) {
     this.target = target;
     this.onHit = onHit;
     this.shape = scene.add.circle(x, y, PROJECTILE.radius, color);
+    if (parent) parent.add(this.shape);
   }
 
   update(deltaSec: number): void {

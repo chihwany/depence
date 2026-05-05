@@ -20,7 +20,12 @@ export class Enemy {
   private slowEndTime = 0;
   private originalColor: number;
 
-  constructor(scene: Phaser.Scene, path: Phaser.Curves.Path, stats: EnemyStats) {
+  constructor(
+    scene: Phaser.Scene,
+    path: Phaser.Curves.Path,
+    stats: EnemyStats,
+    parent: Phaser.GameObjects.Container,
+  ) {
     this.path = path;
     this.pathLength = path.getLength();
     this.stats = stats;
@@ -50,6 +55,8 @@ export class Enemy {
     this.hpBarBg.setOrigin(0, 0.5);
     this.hpBar = scene.add.rectangle(sx - stats.radius, barY, barW, 4, 0x22c55e);
     this.hpBar.setOrigin(0, 0.5);
+
+    parent.add([this.shape, this.label, this.hpBarBg, this.hpBar]);
   }
 
   update(deltaSec: number, currentTime: number): void {

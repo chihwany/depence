@@ -34,6 +34,9 @@ type Selection =
 
 export class GameScene extends Phaser.Scene {
   private grid!: Grid;
+  private worldLayer!: Phaser.GameObjects.Container;
+  private uiLayer!: Phaser.GameObjects.Container;
+  private uiCamera!: Phaser.Cameras.Scene2D.Camera;
   private gridGraphics!: Phaser.GameObjects.Graphics;
   private path: Phaser.Curves.Path | null = null;
   private pathCells: GridPosition[] = [];
@@ -42,6 +45,26 @@ export class GameScene extends Phaser.Scene {
   private towers: Tower[] = [];
   private projectiles: Projectile[] = [];
   private cellTowers = new Map<string, Tower>();
+
+  // World camera (5×5-ish view + drag-to-pan).
+  // 720 / (5 * 70) ≈ 2.057 → ~5 cells visible horizontally; ~9 vertically
+  // because the screen is portrait (1280 / (2.057 * 70) ≈ 8.9).
+  // Using cameras.main.setZoom (instead of container.setScale) is the
+  // canonical Phaser approach and avoids a Phaser 4 quirk where Image
+  // scale was not respected inside a scaled container.
+  private readonly worldZoom = 720 / (5 * GRID_CONFIG.cellSize);
+  private dragState: {
+    startX: number;
+    startY: number;
+    startScrollX: number;
+    startScrollY: number;
+    isDragging: boolean;
+  } | null = null;
+  private readonly dragThreshold = 8;
+  // Set when pointerdown lands on an interactive UI element (card,
+  // button, hand token). Used to suppress drag init + tap fallthrough
+  // so picking a card doesn't also place a tower at the card's location.
+  private pointerOnUI = false;
 
   private phase: Phase = "build";
   private waveIndex = 0;
@@ -78,25 +101,43 @@ export class GameScene extends Phaser.Scene {
     this.matchStartTime = this.time.now;
     this.grid = new Grid(GRID_CONFIG);
     this.applyPathCellsToGrid();
+
+    // Two-camera setup:
+    //   worldLayer (rendered by main camera, zoomed) — grid, towers, enemies
+    //   uiLayer    (rendered by uiCamera, unscaled) — HUD, modals, hand
+    this.worldLayer = this.add.container(0, 0);
+    this.uiLayer = this.add.container(0, 0);
+
     this.gridGraphics = this.add.graphics();
+    this.worldLayer.add(this.gridGraphics);
     this.drawSpawnAndBase();
     this.redrawGrid();
-    this.setupGridInput();
+
+    // Main camera: zoom + bounds. Initial center on lower-middle so the
+    // base + initial path are visible.
+    this.cameras.main.setZoom(this.worldZoom);
+    this.cameras.main.setBounds(0, 0, SCREEN.width, SCREEN.height);
+    const initial = this.grid.cellToWorld(3, 9);
+    this.cameras.main.centerOn(initial.x, initial.y);
+
+    // UI camera: unscaled, full-screen overlay.
+    this.uiCamera = this.cameras.add(0, 0, SCREEN.width, SCREEN.height);
+    this.uiCamera.setName("UI");
+
     this.drawHud();
     this.drawSpeedButton();
     this.drawPauseButton();
     this.handContainer = this.add.container(0, 0);
+    this.uiLayer.add(this.handContainer);
     this.drawStartButton();
     this.refreshHand();
     this.updateStartButton();
 
-    this.input.on(
-      "gameobjectdown",
-      (_p: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject) => {
-        const tower = this.towers.find((t) => t.shape === obj);
-        if (tower) this.onTowerTap(tower);
-      },
-    );
+    // Camera ignore lists: each camera only renders its own layer.
+    this.cameras.main.ignore(this.uiLayer);
+    this.uiCamera.ignore(this.worldLayer);
+
+    this.setupDragAndTapInput();
 
     // Open the starting card pick before wave 1
     this.phase = "cardPick";
@@ -117,7 +158,7 @@ export class GameScene extends Phaser.Scene {
     if (this.phase === "wave" && this.waveRunner && this.path) {
       const newSpawns = this.waveRunner.tick(t);
       for (const stats of newSpawns) {
-        this.enemies.push(new Enemy(this, this.path, stats));
+        this.enemies.push(new Enemy(this, this.path, stats, this.worldLayer));
       }
     }
 
@@ -306,7 +347,7 @@ export class GameScene extends Phaser.Scene {
     const baseRange = this.add.circle(b.x, b.y, BASE.range, BASE.color, 0.05);
     baseRange.setStrokeStyle(1, BASE.color, 0.3);
 
-    this.add
+    const baseText = this.add
       .text(b.x, b.y, "BASE", {
         fontFamily: "sans-serif",
         fontSize: "12px",
@@ -314,21 +355,78 @@ export class GameScene extends Phaser.Scene {
         color: "#ffffff",
       })
       .setOrigin(0.5);
+
+    this.worldLayer.add([this.spawnText, baseRange, baseText]);
   }
 
+  // === Camera (main camera zoom + drag-to-pan) ===
 
-  private setupGridInput(): void {
-    const cfg = this.grid.config;
-    const cx = cfg.offsetX + (cfg.cols * cfg.cellSize) / 2;
-    const cy = cfg.offsetY + (cfg.rows * cfg.cellSize) / 2;
-    const w = cfg.cols * cfg.cellSize;
-    const h = cfg.rows * cfg.cellSize;
-    const area = this.add.rectangle(cx, cy, w, h, 0x000000, 0);
-    area.setInteractive();
-    area.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      const cell = this.grid.worldToCell(p.x, p.y);
-      if (cell) this.onCellTap(cell);
+  private setupDragAndTapInput(): void {
+    // gameobjectdown fires for any interactive game object hit by the
+    // pointer (cards in modal, buttons, hand tokens — all in uiLayer).
+    // Setting the flag here lets pointerdown/pointerup downstream skip
+    // both drag init and the tap-to-place fallthrough.
+    this.input.on("gameobjectdown", () => {
+      this.pointerOnUI = true;
     });
+
+    this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      if (this.pointerOnUI) return;
+      if (this.phase === "cardPick" || this.isPaused) return;
+      this.dragState = {
+        startX: p.x,
+        startY: p.y,
+        startScrollX: this.cameras.main.scrollX,
+        startScrollY: this.cameras.main.scrollY,
+        isDragging: false,
+      };
+    });
+
+    this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
+      if (!this.dragState || !p.isDown) return;
+      const dx = p.x - this.dragState.startX;
+      const dy = p.y - this.dragState.startY;
+      if (
+        !this.dragState.isDragging &&
+        Math.hypot(dx, dy) > this.dragThreshold
+      ) {
+        this.dragState.isDragging = true;
+      }
+      if (this.dragState.isDragging) {
+        const z = this.cameras.main.zoom;
+        this.cameras.main.scrollX = this.dragState.startScrollX - dx / z;
+        this.cameras.main.scrollY = this.dragState.startScrollY - dy / z;
+      }
+    });
+
+    this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
+      const wasOnUI = this.pointerOnUI;
+      this.pointerOnUI = false;
+      if (wasOnUI) {
+        this.dragState = null;
+        return;
+      }
+      if (this.dragState && !this.dragState.isDragging) {
+        const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+        this.handleTap(wp.x, wp.y);
+      }
+      this.dragState = null;
+    });
+  }
+
+  private handleTap(worldX: number, worldY: number): void {
+    if (this.phase === "cardPick" || this.isPaused) return;
+    // Tower tap (manual hit-test in world space). 1.4× radius gives a
+    // forgiving touch target on phones.
+    for (const tower of this.towers) {
+      const r = tower.baseStats.radius * 1.4;
+      if (Math.hypot(worldX - tower.x, worldY - tower.y) <= r) {
+        this.onTowerTap(tower);
+        return;
+      }
+    }
+    const cell = this.grid.worldToCell(worldX, worldY);
+    if (cell) this.onCellTap(cell);
   }
 
   private drawHud(): void {
@@ -349,6 +447,7 @@ export class GameScene extends Phaser.Scene {
         color: "#ffffff",
       })
       .setOrigin(0.5);
+    this.uiLayer.add([this.hpText, this.waveText, this.statusText]);
     this.updateHud();
   }
 
@@ -369,6 +468,7 @@ export class GameScene extends Phaser.Scene {
     this.startButton.setSize(280, 70);
     this.startButton.setInteractive({ useHandCursor: true });
     this.startButton.on("pointerdown", () => this.startWave());
+    this.uiLayer.add(this.startButton);
   }
 
   private updateStartButton(): void {
@@ -454,7 +554,7 @@ export class GameScene extends Phaser.Scene {
   // === Pause ===
 
   private drawPauseButton(): void {
-    createButton(this, SCREEN.width - 60, 40, {
+    const btn = createButton(this, SCREEN.width - 60, 40, {
       label: "PAUSE",
       width: 100,
       height: 44,
@@ -463,10 +563,15 @@ export class GameScene extends Phaser.Scene {
       fontSize: 14,
       onClick: () => this.togglePause(),
     });
+    this.uiLayer.add(btn);
   }
 
   private togglePause(): void {
     if (this.phase === "ended" || this.phase === "cardPick") return;
+    // Suppress drag/tap fallthrough for the pointer event that triggered
+    // this toggle (same fix as pickCard — see comment there).
+    this.pointerOnUI = true;
+    this.dragState = null;
     this.isPaused = !this.isPaused;
     if (this.isPaused) {
       this.showPauseModal();
@@ -525,6 +630,7 @@ export class GameScene extends Phaser.Scene {
       restart,
       quit,
     ]);
+    this.uiLayer.add(this.pauseModal);
   }
 
   private hidePauseModal(): void {
@@ -553,6 +659,7 @@ export class GameScene extends Phaser.Scene {
           }
         }
         const splash = this.add.circle(hx, hy, stats.aoeRadius, stats.color, 0.35);
+        this.worldLayer.add(splash);
         this.tweens.add({
           targets: splash,
           alpha: 0,
@@ -569,7 +676,7 @@ export class GameScene extends Phaser.Scene {
       }
     };
     this.projectiles.push(
-      new Projectile(this, tower.x, tower.y, target, onHit, stats.color),
+      new Projectile(this, tower.x, tower.y, target, onHit, stats.color, this.worldLayer),
     );
   }
 
@@ -600,7 +707,7 @@ export class GameScene extends Phaser.Scene {
       this.spawnDamagePopup(hx, hy, BASE.damage);
     };
     this.projectiles.push(
-      new Projectile(this, baseWorld.x, baseWorld.y, target, onHit, BASE.color),
+      new Projectile(this, baseWorld.x, baseWorld.y, target, onHit, BASE.color, this.worldLayer),
     );
     this.baseLastFireTime = time;
   }
@@ -616,6 +723,7 @@ export class GameScene extends Phaser.Scene {
         color: "#fef3c7",
       })
       .setOrigin(0.5);
+    this.worldLayer.add(text);
     this.tweens.add({
       targets: text,
       y: y - 56,
@@ -628,6 +736,7 @@ export class GameScene extends Phaser.Scene {
 
   private spawnDeathEffect(x: number, y: number, color: number): void {
     const ring = this.add.circle(x, y, 10, color, 0.7);
+    this.worldLayer.add(ring);
     this.tweens.add({
       targets: ring,
       scale: { from: 1, to: 3 },
@@ -639,9 +748,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnFireFlash(tower: Tower): void {
+    const shape = tower.shape as Phaser.GameObjects.GameObject & {
+      scaleX: number;
+    };
+    const base = shape.scaleX;
     this.tweens.add({
       targets: tower.shape,
-      scale: { from: 1.2, to: 1 },
+      scaleX: { from: base * 1.2, to: base },
+      scaleY: { from: base * 1.2, to: base },
       duration: 120,
       ease: "Quad.out",
     });
@@ -662,6 +776,7 @@ export class GameScene extends Phaser.Scene {
       )
       .setOrigin(0.5)
       .setAlpha(0);
+    this.uiLayer.add(text);
 
     this.tweens.add({
       targets: text,
@@ -693,6 +808,7 @@ export class GameScene extends Phaser.Scene {
       fontSize: 18,
       onClick: () => this.toggleSpeed(),
     });
+    this.uiLayer.add(this.speedButton);
   }
 
   private toggleSpeed(): void {
@@ -810,20 +926,36 @@ export class GameScene extends Phaser.Scene {
       subtitle,
       ...cardObjects,
     ]);
+    this.uiLayer.add(this.cardModal);
   }
 
   private pickCard(card: CardDef): void {
     if (this.phase !== "cardPick") return;
 
+    // Suppress the rest of this pointer's event chain. pickCard runs in
+    // the card's pointerdown listener and destroys the card; relying on
+    // gameobjectdown to set this flag is fragile (the event may not fire
+    // for a destroyed object), so set it explicitly. Without this, the
+    // global pointerdown that follows sees phase="build" and inits a
+    // dragState, then pointerup runs handleTap and auto-places the
+    // tower at the card's screen position.
+    this.pointerOnUI = true;
+    this.dragState = null;
+
+    // Auto-select the picked card so the player can place it directly on
+    // the next tap — skips the "click hand token first" extra step.
     switch (card.effect.kind) {
       case "addTower":
         this.towerTokens.push(card.effect.towerType);
+        this.selection = { kind: "tower", towerType: card.effect.towerType };
         break;
       case "upgrade":
         this.upgradeTokens++;
+        this.selection = { kind: "upgrade" };
         break;
       case "addShape":
         this.shapeTokens[card.effect.shapeId] += card.effect.amount;
+        this.selection = { kind: "shape", shapeId: card.effect.shapeId };
         break;
       case "damageBoost":
         this.damageMul *= card.effect.mul;
@@ -837,6 +969,7 @@ export class GameScene extends Phaser.Scene {
     this.cardModal = null;
     this.phase = "build";
     this.refreshHand();
+    this.redrawGrid();
     this.updateHud();
     this.updateStartButton();
   }
@@ -1018,7 +1151,7 @@ export class GameScene extends Phaser.Scene {
       if (idx === -1) return;
 
       const w = this.grid.cellToWorld(pos.col, pos.row);
-      const tower = new Tower(this, w.x, w.y, type);
+      const tower = new Tower(this, w.x, w.y, type, this.worldLayer);
       this.towers.push(tower);
       this.cellTowers.set(`${pos.col},${pos.row}`, tower);
       this.grid.setCellType(pos.col, pos.row, "tower");
@@ -1088,6 +1221,7 @@ export class GameScene extends Phaser.Scene {
   private animateSpawnMove(x: number, y: number): void {
     const size = this.grid.config.cellSize;
     const flash = this.add.rectangle(x, y, size - 2, size - 2, 0xffffff, 0.7);
+    this.worldLayer.add(flash);
     this.tweens.add({
       targets: flash,
       alpha: 0,
