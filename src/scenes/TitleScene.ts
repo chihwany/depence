@@ -14,8 +14,8 @@ const ICON_FILES: Record<string, string> = {
   mechanest: "mechanest.png",
   laser:     "laser.png",
   inferno:   "inferno.png",
-  tesla:     "tesla.svg",
-  frostgun:  "frostgun.svg",
+  tesla:     "tesla.png",
+  frostgun:  "frostgun.png",
   fireworks: "fireworks.svg",
   tornado:   "tornado.svg",
 };
