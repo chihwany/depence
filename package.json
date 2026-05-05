@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sync-icons": "node scripts/sync-icons.mjs"
   },
   "dependencies": {
     "phaser": "^4.1.0"
