@@ -4,7 +4,7 @@ import type { Grid, GridConfig, GridPosition } from "./Grid";
 export const GRID_CONFIG: GridConfig = {
   cols: 8,
   rows: 12,
-  cellSize: 70,
+  cellSize: 39,
   offsetX: 80,
   offsetY: 180,
 };

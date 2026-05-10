@@ -6,9 +6,9 @@ export const SCREEN = {
 export const BASE = {
   maxHp: 15,
   // Base auto-defense: a built-in turret on the base that fires at
-  // anything within `range` pixels. range = 2 cells (cellSize is 70).
+  // anything within `range` pixels. range = 2 cells (cellSize 39 → 78).
   damage: 5,
-  range: 140,
+  range: 78,
   fireRate: 700,
   color: 0x4ade80,
 } as const;
@@ -56,19 +56,20 @@ export interface TowerStats {
   slowDuration?: number;
 }
 
+// Tower ranges by tier (cellSize 39): long=2.5 cells (98), mid=2 (78), short=1.5 (59).
 export const TOWERS: Record<TowerType, TowerStats> = {
   // Original 3 — kept for backwards compatibility
-  sniper:    { damage: 8,  range: 240, fireRate: 800,  color: 0x3b82f6, radius: 18, label: "S" },
-  cannon:    { damage: 5,  range: 180, fireRate: 1200, color: 0xf97316, radius: 20, label: "C", aoeRadius: 70 },
-  frost:     { damage: 1,  range: 150, fireRate: 500,  color: 0x06b6d4, radius: 16, label: "F", slowMul: 0.5, slowDuration: 1500 },
+  sniper:    { damage: 8,  range: 98, fireRate: 800,  color: 0x3b82f6, radius: 18, label: "S" },
+  cannon:    { damage: 5,  range: 78, fireRate: 1200, color: 0xf97316, radius: 20, label: "C", aoeRadius: 52 },
+  frost:     { damage: 1,  range: 78, fireRate: 500,  color: 0x06b6d4, radius: 16, label: "F", slowMul: 0.5, slowDuration: 1500 },
   // New tier — distinct stats per tower
-  tesla:     { damage: 3,  range: 140, fireRate: 400,  color: 0x60a5fa, radius: 17, label: "Te", aoeRadius: 60 },
-  laser:     { damage: 2,  range: 220, fireRate: 200,  color: 0xeab308, radius: 16, label: "La" },
-  frostgun:  { damage: 2,  range: 170, fireRate: 600,  color: 0x67e8f9, radius: 17, label: "Fg", slowMul: 0.3, slowDuration: 2000 },
-  fireworks: { damage: 14, range: 200, fireRate: 2500, color: 0xf43f5e, radius: 19, label: "Fw", aoeRadius: 110 },
-  inferno:   { damage: 3,  range: 90,  fireRate: 250,  color: 0xea580c, radius: 17, label: "In" },
-  tornado:   { damage: 4,  range: 160, fireRate: 700,  color: 0x9ca3af, radius: 17, label: "Tn", slowMul: 0.7, slowDuration: 1000 },
-  mechanest: { damage: 12, range: 220, fireRate: 900,  color: 0x8b5cf6, radius: 20, label: "Mn" },
+  tesla:     { damage: 3,  range: 59, fireRate: 400,  color: 0x60a5fa, radius: 17, label: "Te", aoeRadius: 50 },
+  laser:     { damage: 2,  range: 98, fireRate: 200,  color: 0xeab308, radius: 16, label: "La" },
+  frostgun:  { damage: 2,  range: 78, fireRate: 600,  color: 0x67e8f9, radius: 17, label: "Fg", slowMul: 0.3, slowDuration: 2000 },
+  fireworks: { damage: 14, range: 78, fireRate: 2500, color: 0xf43f5e, radius: 19, label: "Fw", aoeRadius: 81 },
+  inferno:   { damage: 3,  range: 59, fireRate: 250,  color: 0xea580c, radius: 17, label: "In" },
+  tornado:   { damage: 4,  range: 78, fireRate: 700,  color: 0x9ca3af, radius: 17, label: "Tn", slowMul: 0.7, slowDuration: 1000 },
+  mechanest: { damage: 12, range: 98, fireRate: 900,  color: 0x8b5cf6, radius: 20, label: "Mn" },
 };
 
 export const PROJECTILE = {

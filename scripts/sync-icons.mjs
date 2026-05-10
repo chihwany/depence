@@ -19,6 +19,9 @@ const DEST_DIR = join(ROOT, "public", "assets", "icons");
 const MAPPING = {
   "sniper.png":    "sniper.png",
   "cannon.png":    "cannon.png",
+  "cannon-7.png":  "cannon-7.png",
+  "cannon-9.png":  "cannon-9.png",
+  "cannon-10.png": "cannon-10.png",
   "frost.png":     "frost.png",
   "mechanest.png": "mechanest.png",
   "laser.png":     "laser.png",

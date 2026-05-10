@@ -3,6 +3,38 @@ import { TOWERS, type TowerStats, type TowerType } from "../data/balance";
 import { Enemy } from "./Enemy";
 import { drawIcon, towerIconKind } from "../ui/Icons";
 
+// Cannon directional sprites: barrels point left in the source art, so we
+// mirror via flipX to cover the right half. Angles are degrees in Phaser
+// convention (0 = east, 90 = south, 180 = west, 270 = north).
+interface CannonVariant {
+  angle: number;
+  key: string;
+  flipX: boolean;
+}
+const CANNON_VARIANTS: CannonVariant[] = [
+  { angle: 0,   key: "icon-cannon-9",  flipX: true  }, // 3 o'clock — east
+  { angle: 60,  key: "icon-cannon-7",  flipX: true  }, // 5 o'clock
+  { angle: 120, key: "icon-cannon-7",  flipX: false }, // 7 o'clock
+  { angle: 180, key: "icon-cannon-9",  flipX: false }, // 9 o'clock — west
+  { angle: 210, key: "icon-cannon-10", flipX: false }, // 10 o'clock
+  { angle: 330, key: "icon-cannon-10", flipX: true  }, // 2 o'clock
+];
+
+function pickCannonVariant(angleRad: number): CannonVariant {
+  const deg = ((angleRad * 180) / Math.PI + 360) % 360;
+  let best = CANNON_VARIANTS[0]!;
+  let bestDist = 360;
+  for (const v of CANNON_VARIANTS) {
+    const raw = Math.abs(deg - v.angle);
+    const d = Math.min(raw, 360 - raw);
+    if (d < bestDist) {
+      bestDist = d;
+      best = v;
+    }
+  }
+  return best;
+}
+
 export class Tower {
   x: number;
   y: number;
@@ -17,6 +49,8 @@ export class Tower {
   private levelText: Phaser.GameObjects.Text;
   private lastFireTime = 0;
   private target: Enemy | null = null;
+  // Set only for cannon towers — Image reference used for directional swap.
+  private cannonImage: Phaser.GameObjects.Image | null = null;
 
   constructor(
     scene: Phaser.Scene,
@@ -34,9 +68,9 @@ export class Tower {
     this.rangeRing.setStrokeStyle(1, this.baseStats.color, 0.25);
 
     // Icon-only tower visual: no circle background. Sized to fit inside a
-    // grid cell (cellSize=70 → ~85% fill). Procedural fallback uses
-    // baseStats.color so it isn't invisible white-on-dark.
-    const iconSize = 60;
+    // grid cell (~85% fill). Procedural fallback uses baseStats.color so
+    // it isn't invisible white-on-dark.
+    const iconSize = 33;
     this.shape = drawIcon(
       scene,
       towerIconKind(this.type),
@@ -45,6 +79,9 @@ export class Tower {
       iconSize,
       this.baseStats.color,
     );
+    if (this.type === "cannon" && this.shape instanceof Phaser.GameObjects.Image) {
+      this.cannonImage = this.shape;
+    }
 
     const textOffset = iconSize / 2 + 2;
     this.levelText = scene.add
@@ -101,10 +138,34 @@ export class Tower {
       this.target = this.findTarget(enemies);
     }
 
+    if (this.cannonImage) {
+      this.updateCannonFacing(this.target);
+    }
+
     if (this.target && time - this.lastFireTime >= this.fireRate) {
       onFire(this.target);
       this.lastFireTime = time;
     }
+  }
+
+  private updateCannonFacing(target: Enemy | null): void {
+    if (!this.cannonImage) return;
+    if (!target) {
+      // Idle — revert to default art so the cannon doesn't keep aiming
+      // at a stale direction once the target is gone.
+      if (this.cannonImage.texture.key !== "icon-cannon") {
+        this.cannonImage.setTexture("icon-cannon");
+      }
+      this.cannonImage.setFlipX(false);
+      return;
+    }
+    const dx = target.shape.x - this.x;
+    const dy = target.shape.y - this.y;
+    const variant = pickCannonVariant(Math.atan2(dy, dx));
+    if (this.cannonImage.texture.key !== variant.key) {
+      this.cannonImage.setTexture(variant.key);
+    }
+    this.cannonImage.setFlipX(variant.flipX);
   }
 
   private findTarget(enemies: readonly Enemy[]): Enemy | null {

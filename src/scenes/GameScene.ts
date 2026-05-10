@@ -53,13 +53,15 @@ export class GameScene extends Phaser.Scene {
   private projectiles: Projectile[] = [];
   private cellTowers = new Map<string, Tower>();
 
-  // World camera (5×5-ish view + drag-to-pan).
-  // 720 / (5 * 70) ≈ 2.057 → ~5 cells visible horizontally; ~9 vertically
-  // because the screen is portrait (1280 / (2.057 * 70) ≈ 8.9).
+  // World camera (drag-to-pan). Pixel-per-world-unit zoom is held
+  // independent of cellSize, so changing GRID_CONFIG.cellSize directly
+  // shrinks/grows the on-screen cell. 720/350 ≈ 2.057 keeps the original
+  // pixel scale (5 × 70-px cells across 720 px) — with cellSize=49 the
+  // on-screen cell is ~100 px and ~7 cells fit horizontally.
   // Using cameras.main.setZoom (instead of container.setScale) is the
   // canonical Phaser approach and avoids a Phaser 4 quirk where Image
   // scale was not respected inside a scaled container.
-  private readonly worldZoom = 720 / (5 * GRID_CONFIG.cellSize);
+  private readonly worldZoom = 720 / 350;
   private dragState: {
     startX: number;
     startY: number;

@@ -8,16 +8,19 @@ import { createButton } from "../ui/Button";
 // loaded texture by key, so swapping a tower over to PNG just means
 // flipping the value here.
 const ICON_FILES: Record<string, string> = {
-  sniper:    "sniper.png",
-  cannon:    "cannon.png",
-  frost:     "frost.png",
-  mechanest: "mechanest.png",
-  laser:     "laser.png",
-  inferno:   "inferno.png",
-  tesla:     "tesla.png",
-  frostgun:  "frostgun.png",
-  fireworks: "fireworks.png",
-  tornado:   "tornado.png",
+  sniper:      "sniper.png",
+  cannon:      "cannon.png",
+  "cannon-7":  "cannon-7.png",
+  "cannon-9":  "cannon-9.png",
+  "cannon-10": "cannon-10.png",
+  frost:       "frost.png",
+  mechanest:   "mechanest.png",
+  laser:       "laser.png",
+  inferno:     "inferno.png",
+  tesla:       "tesla.png",
+  frostgun:    "frostgun.png",
+  fireworks:   "fireworks.png",
+  tornado:     "tornado.png",
 };
 
 export class TitleScene extends Phaser.Scene {
