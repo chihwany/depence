@@ -16,8 +16,8 @@ const ICON_FILES: Record<string, string> = {
   inferno:   "inferno.png",
   tesla:     "tesla.png",
   frostgun:  "frostgun.png",
-  fireworks: "fireworks.svg",
-  tornado:   "tornado.svg",
+  fireworks: "fireworks.png",
+  tornado:   "tornado.png",
 };
 
 export class TitleScene extends Phaser.Scene {

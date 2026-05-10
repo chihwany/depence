@@ -15,7 +15,14 @@ import {
   buildCurvePathFromCells,
 } from "../systems/Path";
 import { Grid, type GridPosition } from "../systems/Grid";
-import { getBackPlacement, type Placement } from "../systems/Shape";
+import {
+  DIRECTIONS,
+  computeBackDirection,
+  isValidPlacement,
+  shapeCellsAt,
+  type Direction,
+  type Placement,
+} from "../systems/Shape";
 import { WaveRunner } from "../systems/WaveRunner";
 import { drawCards, drawStarterCards } from "../systems/CardPool";
 import { Enemy } from "../entities/Enemy";
@@ -65,6 +72,22 @@ export class GameScene extends Phaser.Scene {
   // button, hand token). Used to suppress drag init + tap fallthrough
   // so picking a card doesn't also place a tower at the card's location.
   private pointerOnUI = false;
+
+  // Shape placement preview — drag-to-position UX. The placement starts
+  // at the first valid rotation when a shape token is tapped. The player
+  // can rotate it by dragging (drag direction from spawn picks N/E/S/W)
+  // and finalize via the confirm button. Cells render green when valid,
+  // red when not (e.g., no rotation fits the current grid state).
+  private shapePlacement: {
+    cells: GridPosition[];
+    dir: Direction;
+    isValid: boolean;
+  } | null = null;
+  private shapeDragActive = false;
+  private tokenLongPress: { shapeId: ShapeId; timer: number } | null = null;
+  private tokenLongPressFired = false;
+  private confirmButton: Phaser.GameObjects.Container | null = null;
+  private cancelButton: Phaser.GameObjects.Container | null = null;
 
   private phase: Phase = "build";
   private waveIndex = 0;
@@ -229,6 +252,12 @@ export class GameScene extends Phaser.Scene {
     this.upgradeTokens = 0;
     this.shapeTokens = { I1: 0, I2: 0, I3: 0, L3: 0, L4: 0, L5: 0, U4: 0, U5: 0, U7: 0 };
     this.selection = null;
+    this.shapePlacement = null;
+    this.shapeDragActive = false;
+    this.tokenLongPress = null;
+    this.tokenLongPressFired = false;
+    this.confirmButton = null;
+    this.cancelButton = null;
     this.baseLastFireTime = 0;
     this.cardModal = null;
     this.pauseModal = null;
@@ -304,29 +333,23 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Highlight the single back-of-spawn placement for the selected shape
-    if (
-      this.phase === "build" &&
-      this.selection?.kind === "shape" &&
-      this.shapeTokens[this.selection.shapeId] > 0
-    ) {
-      const shape = SHAPES[this.selection.shapeId];
-      const placement = getBackPlacement(this.grid, this.pathCells, shape);
-      if (placement) {
-        for (let i = 0; i < placement.cells.length; i++) {
-          const c = placement.cells[i];
-          if (!c) continue;
-          const w = this.grid.cellToWorld(c.col, c.row);
-          const x = w.x - size / 2 + 1;
-          const y = w.y - size / 2 + 1;
-          // Use a yellow fill + stroke so the preview reads clearly as
-          // "tap here", and never gets confused with the spawn's red fill.
-          this.gridGraphics.fillStyle(0xfde047, 0.25);
-          this.gridGraphics.fillRect(x, y, inner, inner);
-          const alpha = i === 0 ? 0.95 : 0.6;
-          this.gridGraphics.lineStyle(3, 0xfde047, alpha);
-          this.gridGraphics.strokeRect(x, y, inner, inner);
-        }
+    // Shape placement preview — green when the cells form a valid
+    // placement, red when not. Driven by `shapePlacement` (drag-to-rotate
+    // UX); no longer the auto-back-only behavior.
+    if (this.phase === "build" && this.shapePlacement) {
+      const placement = this.shapePlacement;
+      const color = placement.isValid ? 0x4ade80 : 0xef4444;
+      for (let i = 0; i < placement.cells.length; i++) {
+        const c = placement.cells[i];
+        if (!c) continue;
+        const w = this.grid.cellToWorld(c.col, c.row);
+        const x = w.x - size / 2 + 1;
+        const y = w.y - size / 2 + 1;
+        this.gridGraphics.fillStyle(color, 0.32);
+        this.gridGraphics.fillRect(x, y, inner, inner);
+        const alpha = i === 0 ? 0.95 : 0.6;
+        this.gridGraphics.lineStyle(3, color, alpha);
+        this.gridGraphics.strokeRect(x, y, inner, inner);
       }
     }
   }
@@ -373,6 +396,24 @@ export class GameScene extends Phaser.Scene {
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
       if (this.pointerOnUI) return;
       if (this.phase === "cardPick" || this.isPaused) return;
+
+      // If pointerdown lands on a current shape preview cell, start a
+      // shape drag (rotate by drag direction) instead of a camera pan.
+      if (this.shapePlacement) {
+        const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+        const cell = this.grid.worldToCell(wp.x, wp.y);
+        if (
+          cell &&
+          this.shapePlacement.cells.some(
+            (c) => c.col === cell.col && c.row === cell.row,
+          )
+        ) {
+          this.shapeDragActive = true;
+          this.updateShapeDragPosition(wp.x, wp.y);
+          return;
+        }
+      }
+
       this.dragState = {
         startX: p.x,
         startY: p.y,
@@ -383,6 +424,19 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
+      // Cancel a pending long-press timer if the user starts moving the
+      // finger before it fires — but immediately enter drag mode so the
+      // press-and-drag-from-token gesture feels responsive.
+      if (this.tokenLongPress && !this.tokenLongPressFired) {
+        this.fireTokenLongPress();
+      }
+
+      if (this.shapeDragActive && p.isDown) {
+        const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+        this.updateShapeDragPosition(wp.x, wp.y);
+        return;
+      }
+
       if (!this.dragState || !p.isDown) return;
       const dx = p.x - this.dragState.startX;
       const dy = p.y - this.dragState.startY;
@@ -400,6 +454,28 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
+      // Resolve a hand-token press: if the long-press never fired, treat
+      // it as a quick tap (toggle selection); if it fired, the drag was
+      // active and we just stop it here.
+      const longPress = this.tokenLongPress;
+      const longPressFired = this.tokenLongPressFired;
+      if (longPress) {
+        clearTimeout(longPress.timer);
+        this.tokenLongPress = null;
+        this.tokenLongPressFired = false;
+        if (!longPressFired) {
+          this.selectShapeToken(longPress.shapeId);
+          this.dragState = null;
+          return;
+        }
+      }
+
+      if (this.shapeDragActive) {
+        this.shapeDragActive = false;
+        this.dragState = null;
+        return;
+      }
+
       const wasOnUI = this.pointerOnUI;
       this.pointerOnUI = false;
       if (wasOnUI) {
@@ -512,6 +588,9 @@ export class GameScene extends Phaser.Scene {
     const newPath = buildCurvePathFromCells(this.grid, this.pathCells);
     if (!newPath) return;
     this.path = newPath;
+    this.shapePlacement = null;
+    this.shapeDragActive = false;
+    this.refreshShapeButtons();
     this.redrawGrid();
     this.phase = "wave";
     this.selection = null;
@@ -956,6 +1035,9 @@ export class GameScene extends Phaser.Scene {
       case "addShape":
         this.shapeTokens[card.effect.shapeId] += card.effect.amount;
         this.selection = { kind: "shape", shapeId: card.effect.shapeId };
+        // Show the placement preview + confirm/cancel buttons immediately
+        // so the player doesn't have to retap the hand token.
+        this.shapePlacement = this.computeInitialPlacement(card.effect.shapeId);
         break;
       case "damageBoost":
         this.damageMul *= card.effect.mul;
@@ -970,6 +1052,7 @@ export class GameScene extends Phaser.Scene {
     this.phase = "build";
     this.refreshHand();
     this.redrawGrid();
+    this.refreshShapeButtons();
     this.updateHud();
     this.updateStartButton();
   }
@@ -1024,7 +1107,12 @@ export class GameScene extends Phaser.Scene {
         isSelected ? 1 : 0.5,
       );
       token.setInteractive({ useHandCursor: true });
-      token.on("pointerdown", () => this.selectShapeToken(shapeId));
+      // Quick tap = select + show preview at first valid rotation.
+      // Long-press (250ms hold or any movement before release) = enter
+      // drag mode immediately so the player can drag the preview around.
+      // The actual "tap vs long-press" disambiguation happens in the
+      // global pointerup handler.
+      token.on("pointerdown", () => this.startTokenLongPress(shapeId));
 
       const icon = drawIcon(this, shapeIconKind(shapeId), xPos, yPos - 4, tokenSize * 0.95, 0xffffff);
       const countLbl = this.add
@@ -1136,12 +1224,169 @@ export class GameScene extends Phaser.Scene {
       this.selection?.kind === "shape" &&
       this.selection.shapeId === shapeId
     ) {
-      this.selection = null;
-    } else {
-      this.selection = { kind: "shape", shapeId };
+      // Re-tap same token = cancel placement entirely.
+      this.cancelShapePlacement();
+      return;
     }
+    this.selection = { kind: "shape", shapeId };
+    this.shapePlacement = this.computeInitialPlacement(shapeId);
     this.refreshHand();
     this.redrawGrid();
+    this.refreshShapeButtons();
+  }
+
+  // === Shape drag-to-place placement ===
+
+  private computeInitialPlacement(shapeId: ShapeId): {
+    cells: GridPosition[];
+    dir: Direction;
+    isValid: boolean;
+  } {
+    const shape = SHAPES[shapeId];
+    const spawn = this.currentSpawn();
+    const backDir = computeBackDirection(this.pathCells);
+    // Prefer back direction (the original auto-rotated default) so the
+    // common case behaves identically to before — but if it's blocked,
+    // fall back to whichever rotation fits.
+    const backCells = shapeCellsAt(spawn, shape, backDir);
+    if (isValidPlacement(this.grid, backCells)) {
+      return { cells: backCells, dir: backDir, isValid: true };
+    }
+    for (const dir of DIRECTIONS) {
+      if (dir === backDir) continue;
+      const cells = shapeCellsAt(spawn, shape, dir);
+      if (isValidPlacement(this.grid, cells)) {
+        return { cells, dir, isValid: true };
+      }
+    }
+    // No rotation fits — show the back-direction preview in red so the
+    // player sees the shape and can cancel.
+    return { cells: backCells, dir: backDir, isValid: false };
+  }
+
+  private updateShapeDragPosition(worldX: number, worldY: number): void {
+    if (!this.selection || this.selection.kind !== "shape") return;
+    const shape = SHAPES[this.selection.shapeId];
+    const spawn = this.currentSpawn();
+    const spawnWorld = this.grid.cellToWorld(spawn.col, spawn.row);
+    const dx = worldX - spawnWorld.x;
+    const dy = worldY - spawnWorld.y;
+    // Snap drag direction to the nearest cardinal — only 4 rotations are
+    // structurally valid (first cell of shape must be adjacent to spawn).
+    let dir: Direction;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      dir = dx > 0 ? 1 : 3; // east : west
+    } else {
+      dir = dy > 0 ? 2 : 0; // south : north
+    }
+    const cells = shapeCellsAt(spawn, shape, dir);
+    const isValid = isValidPlacement(this.grid, cells);
+    this.shapePlacement = { cells, dir, isValid };
+    this.redrawGrid();
+    this.refreshShapeButtons();
+  }
+
+  private confirmShapePlacement(): void {
+    if (!this.selection || this.selection.kind !== "shape") return;
+    if (!this.shapePlacement || !this.shapePlacement.isValid) return;
+    const shapeId = this.selection.shapeId;
+    this.placeShape(shapeId, {
+      dir: this.shapePlacement.dir,
+      cells: this.shapePlacement.cells,
+    });
+    // If the player still has tokens of the same shape, queue up the
+    // next preview at the new spawn so they can chain placements
+    // without retapping the hand token. Otherwise clear the preview.
+    if (this.shapeTokens[shapeId] > 0) {
+      this.shapePlacement = this.computeInitialPlacement(shapeId);
+    } else {
+      this.shapePlacement = null;
+    }
+    this.redrawGrid();
+    this.refreshShapeButtons();
+  }
+
+  private cancelShapePlacement(): void {
+    this.selection = null;
+    this.shapePlacement = null;
+    this.shapeDragActive = false;
+    this.refreshHand();
+    this.redrawGrid();
+    this.refreshShapeButtons();
+  }
+
+  private startTokenLongPress(shapeId: ShapeId): void {
+    if (this.tokenLongPress) {
+      clearTimeout(this.tokenLongPress.timer);
+    }
+    this.tokenLongPressFired = false;
+    this.tokenLongPress = {
+      shapeId,
+      timer: window.setTimeout(() => {
+        // Long-press fired without movement → enter drag mode at the
+        // current pointer position.
+        this.fireTokenLongPress();
+      }, 250),
+    };
+  }
+
+  private fireTokenLongPress(): void {
+    if (!this.tokenLongPress || this.tokenLongPressFired) return;
+    const shapeId = this.tokenLongPress.shapeId;
+    this.tokenLongPressFired = true;
+    // Make sure the shape is selected and the preview exists.
+    if (
+      !this.selection ||
+      this.selection.kind !== "shape" ||
+      this.selection.shapeId !== shapeId
+    ) {
+      this.selection = { kind: "shape", shapeId };
+      this.shapePlacement = this.computeInitialPlacement(shapeId);
+      this.refreshHand();
+      this.refreshShapeButtons();
+    }
+    this.shapeDragActive = true;
+    // Update the placement based on the current pointer position so the
+    // preview reacts to the held finger right away.
+    const p = this.input.activePointer;
+    const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+    this.updateShapeDragPosition(wp.x, wp.y);
+  }
+
+  private refreshShapeButtons(): void {
+    if (this.confirmButton) {
+      this.confirmButton.destroy();
+      this.confirmButton = null;
+    }
+    if (this.cancelButton) {
+      this.cancelButton.destroy();
+      this.cancelButton = null;
+    }
+    if (!this.shapePlacement) return;
+
+    const yPos = SCREEN.height - 200;
+    const isValid = this.shapePlacement.isValid;
+    this.confirmButton = createButton(this, SCREEN.width - 220, yPos, {
+      label: isValid ? "확정" : "확정 (불가)",
+      width: 130,
+      height: 56,
+      fillColor: isValid ? 0x4ade80 : 0x6b7280,
+      textColor: isValid ? "#0f172a" : "#d1d5db",
+      fontSize: 18,
+      onClick: () => this.confirmShapePlacement(),
+    });
+    this.uiLayer.add(this.confirmButton);
+
+    this.cancelButton = createButton(this, SCREEN.width - 70, yPos, {
+      label: "취소",
+      width: 100,
+      height: 56,
+      fillColor: 0xef4444,
+      textColor: "#ffffff",
+      fontSize: 18,
+      onClick: () => this.cancelShapePlacement(),
+    });
+    this.uiLayer.add(this.cancelButton);
   }
 
   // === Slot / tower interactions ===
@@ -1171,19 +1416,10 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Shape placement: shape selected + tap any cell of the back placement
-    if (this.selection?.kind === "shape") {
-      const shape = SHAPES[this.selection.shapeId];
-      if (this.shapeTokens[shape.id as ShapeId] <= 0) return;
-      const placement = getBackPlacement(this.grid, this.pathCells, shape);
-      if (
-        placement &&
-        placement.cells.some((c) => c.col === pos.col && c.row === pos.row)
-      ) {
-        this.placeShape(shape.id as ShapeId, placement);
-      }
-      return;
-    }
+    // Shape placement is no longer tap-to-place — the player drags the
+    // preview to reposition (or long-presses the hand token) and then
+    // taps the 확정 button. Plain cell taps do nothing here.
+    if (this.selection?.kind === "shape") return;
     // Spawn taps no longer remove cells — placements are permanent within
     // a match. (Removed accidental-contract behavior per user feedback.)
   }
